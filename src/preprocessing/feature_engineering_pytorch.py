@@ -622,6 +622,26 @@ class WildfireDatasetWithFeatures(torch.utils.data.Dataset):
             if var in ds:
                 features[var] = ds[var].values
 
+        # Add fire history as a feature
+        # For each timestep t, show the cumulative burned areas up to t-1
+        # This allows the model to see where fire has already burned
+        if 'burned_areas' in ds:
+            burned_areas = ds['burned_areas'].values  # [T, H, W]
+            T, H, W = burned_areas.shape
+
+            # Create fire history: cumulative burned areas from previous timesteps
+            fire_history = np.zeros_like(burned_areas)
+            for t in range(1, T):
+                # At timestep t, show all burns up to t-1
+                fire_history[t] = (burned_areas[:t].sum(axis=0) > 0).astype(np.float32)
+
+            # Timestep 0 has no history (all zeros)
+            features['fire_history'] = fire_history
+
+            # Also add ignition points if available
+            if 'ignition_points' in ds:
+                features['ignition_points'] = ds['ignition_points'].values
+
         return features
 
     def _compute_derived_features(self, features_dict: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
