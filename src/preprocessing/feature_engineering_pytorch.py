@@ -397,10 +397,20 @@ class FeatureEngineering:
 
         # Pad to match original size
         pad_size = window_size - 1
-        rolling_mean = F.pad(rolling_mean, (0, 0, 0, 0, pad_size, 0), mode='replicate')
-        rolling_max = F.pad(rolling_max, (0, 0, 0, 0, pad_size, 0), mode='replicate')
-        rolling_min = F.pad(rolling_min, (0, 0, 0, 0, pad_size, 0), mode='replicate')
-        rolling_sum = F.pad(rolling_sum, (0, 0, 0, 0, pad_size, 0), mode='replicate')
+
+        # For 3D tensors, we need to pad along the first dimension
+        # Repeat the first value pad_size times along dim 0
+        if rolling_mean.dim() == 3:
+            rolling_mean = torch.cat([rolling_mean[0:1].repeat(pad_size, 1, 1), rolling_mean], dim=0)
+            rolling_max = torch.cat([rolling_max[0:1].repeat(pad_size, 1, 1), rolling_max], dim=0)
+            rolling_min = torch.cat([rolling_min[0:1].repeat(pad_size, 1, 1), rolling_min], dim=0)
+            rolling_sum = torch.cat([rolling_sum[0:1].repeat(pad_size, 1, 1), rolling_sum], dim=0)
+        else:
+            # For 2D or other dims, use regular padding
+            rolling_mean = F.pad(rolling_mean, (0, 0, pad_size, 0), mode='replicate')
+            rolling_max = F.pad(rolling_max, (0, 0, pad_size, 0), mode='replicate')
+            rolling_min = F.pad(rolling_min, (0, 0, pad_size, 0), mode='replicate')
+            rolling_sum = F.pad(rolling_sum, (0, 0, pad_size, 0), mode='replicate')
 
         return {
             'mean': rolling_mean,
@@ -426,7 +436,11 @@ class FeatureEngineering:
             diff = diff[1:] - diff[:-1]
 
         # Pad to maintain size
-        diff = F.pad(diff, (0, 0, 0, 0, order, 0), mode='replicate')
+        # Repeat the first value order times along dim 0
+        if diff.dim() == 3:
+            diff = torch.cat([diff[0:1].repeat(order, 1, 1), diff], dim=0)
+        else:
+            diff = F.pad(diff, (0, 0, order, 0), mode='replicate')
 
         return diff
 
@@ -513,21 +527,31 @@ class WildfireDatasetWithFeatures(torch.utils.data.Dataset):
                  file_paths: List[Path],
                  apply_feature_engineering: bool = True,
                  normalize: bool = True,
-                 augment: bool = False):
+                 augment: bool = False,
+                 stats_path: Optional[Path] = None):
         """
         Args:
             file_paths: List of paths to NetCDF files
             apply_feature_engineering: Whether to compute derived features
             normalize: Whether to normalize features
             augment: Whether to apply data augmentation
+            stats_path: Path to normalization statistics JSON file
         """
         self.file_paths = file_paths
         self.apply_feature_engineering = apply_feature_engineering
         self.normalize = normalize
         self.augment = augment
 
-        # Normalization statistics (would be computed from training set)
+        # Load normalization statistics if provided
         self.stats = None
+        if stats_path and Path(stats_path).exists():
+            import json
+            with open(stats_path, 'r') as f:
+                self.stats = json.load(f)
+            print(f"Loaded normalization statistics from {stats_path}")
+            print(f"  Number of channels: {self.stats['num_channels']}")
+        elif normalize and stats_path:
+            print(f"Warning: Normalization requested but stats file not found: {stats_path}")
 
     def __len__(self):
         return len(self.file_paths)
@@ -659,9 +683,27 @@ class WildfireDatasetWithFeatures(torch.utils.data.Dataset):
         return features
 
     def _normalize(self, features: torch.Tensor) -> torch.Tensor:
-        """Normalize features using pre-computed statistics."""
-        # Placeholder - implement based on computed stats
-        return features
+        """
+        Normalize features using pre-computed statistics.
+
+        Args:
+            features: Feature tensor [T, C, H, W]
+
+        Returns:
+            normalized_features: Normalized tensor [T, C, H, W]
+        """
+        if self.stats is None:
+            return features
+
+        # features: [T, C, H, W]
+        # Extract mean and std
+        mean = torch.tensor(self.stats['mean'], dtype=features.dtype).view(1, -1, 1, 1)  # [1, C, 1, 1]
+        std = torch.tensor(self.stats['std'], dtype=features.dtype).view(1, -1, 1, 1)    # [1, C, 1, 1]
+
+        # Normalize: (x - mean) / std
+        features_normalized = (features - mean) / (std + 1e-8)
+
+        return features_normalized
 
     def _augment(self, features: torch.Tensor, target: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Apply data augmentation."""
