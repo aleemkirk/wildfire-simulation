@@ -68,12 +68,14 @@ class DiceLoss(nn.Module):
 class CombinedLoss(nn.Module):
     """
     Combined BCE + Dice Loss for better training.
+    Uses positive class weighting to handle class imbalance.
     """
-    def __init__(self, bce_weight: float = 0.5, dice_weight: float = 0.5):
+    def __init__(self, bce_weight: float = 0.5, dice_weight: float = 0.5, pos_weight: float = 10.0):
         super().__init__()
         self.bce_weight = bce_weight
         self.dice_weight = dice_weight
-        self.bce = nn.BCEWithLogitsLoss()
+        # Penalize false negatives more by weighting positive class higher
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight]))
         self.dice = DiceLoss()
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -82,6 +84,10 @@ class CombinedLoss(nn.Module):
             target_bce = target.unsqueeze(1)
         else:
             target_bce = target
+
+        # Move pos_weight to same device as pred
+        if self.bce.pos_weight.device != pred.device:
+            self.bce.pos_weight = self.bce.pos_weight.to(pred.device)
 
         bce_loss = self.bce(pred, target_bce)
         dice_loss = self.dice(pred, target)
@@ -334,7 +340,7 @@ def main():
         'test_ratio': 0.15,
 
         # Model
-        'in_channels': 30,  # Will be determined by dataset
+        'in_channels': 30,  # Will be automatically determined by dataset (now includes fire_history & ignition_points)
         'out_channels': 1,
         'base_channels': 32,
         'depth': 3,
@@ -349,13 +355,14 @@ def main():
         # Loss
         'bce_weight': 0.5,
         'dice_weight': 0.5,
+        'pos_weight': 60.0,  # Weight for positive class (increase if recall is low)
 
         # Checkpoints
-        'checkpoint_dir': Path('../../trained_models/unet3d'),
+        'checkpoint_dir': Path('trained_models/unet3d'),
         'save_every': 5,
 
-        # Device
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu'
+        # Device (supports CUDA, MPS for Apple Silicon, or CPU)
+        'device': 'cuda' if torch.cuda.is_available() else ('mps' if torch.backends.mps.is_available() else 'cpu')
     }
 
     print("="*80)
@@ -450,7 +457,8 @@ def main():
     # ========================================================================
     criterion = CombinedLoss(
         bce_weight=config['bce_weight'],
-        dice_weight=config['dice_weight']
+        dice_weight=config['dice_weight'],
+        pos_weight=config['pos_weight']
     )
 
     optimizer = optim.Adam(
@@ -463,8 +471,7 @@ def main():
         optimizer,
         mode='min',
         factor=0.5,
-        patience=5,
-        verbose=True
+        patience=5
     )
 
     # ========================================================================
