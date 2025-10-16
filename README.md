@@ -102,6 +102,75 @@ Wildfire-Spread-Simulation/
 └── README.md            # This file
 ```
 
+## 📦 Dataset Overview
+
+This project uses the **MesoGEOS Wildfire Dataset**, a comprehensive collection of wildfire events across the Mediterranean region from 2006-2022, featuring 64×64 spatial grids with 10-day temporal sequences.
+
+### Dataset Characteristics
+- **Format**: NetCDF (.nc) files
+- **Spatial Resolution**: 64×64 grid cells
+- **Temporal Coverage**: 10 timesteps per sample (~10 days)
+- **Geographic Coverage**: 27+ countries across Mediterranean region
+- **Time Range**: 2006-2022
+- **Total Variables**: 34 features + target
+
+### Dataset Variables
+
+| Category | Variable | Description | Dimensions | Units/Range |
+|----------|----------|-------------|------------|-------------|
+| **Target** | `burned_areas` | Binary mask showing fire spread over time | (time, y, x) | 0-1 |
+| **Terrain** | `dem` | Digital Elevation Model (elevation) | (y, x) | meters |
+| | `slope` | Terrain slope | (y, x) | degrees |
+| | `aspect` | Slope direction/orientation | (y, x) | degrees (0-360) |
+| | `curvature` | Terrain curvature (concave/convex) | (y, x) | unitless |
+| **Land Cover** | `lc_agriculture` | Agricultural land fraction | (y, x) | 0-1 |
+| | `lc_forest` | Forest cover fraction | (y, x) | 0-1 |
+| | `lc_grassland` | Grassland fraction | (y, x) | 0-1 |
+| | `lc_settlement` | Settlement/urban fraction | (y, x) | 0-1 |
+| | `lc_shrubland` | Shrubland fraction | (y, x) | 0-1 |
+| | `lc_sparse_vegetation` | Sparse vegetation fraction | (y, x) | 0-1 |
+| | `lc_water_bodies` | Water bodies fraction | (y, x) | 0-1 |
+| | `lc_wetland` | Wetland fraction | (y, x) | 0-1 |
+| **Infrastructure** | `roads_distance` | Distance to nearest road | (y, x) | kilometers |
+| | `population` | Population density | (y, x) | persons/cell |
+| **Weather** | `t2m` | 2-meter air temperature | (time, y, x) | Kelvin |
+| | `d2m` | 2-meter dewpoint temperature | (time, y, x) | Kelvin |
+| | `rh` | Relative humidity | (time, y, x) | 0-1 |
+| | `tp` | Total precipitation | (time, y, x) | meters |
+| | `sp` | Surface pressure | (time, y, x) | Pascals |
+| | `ssrd` | Surface solar radiation downwards | (time, y, x) | J/m² |
+| | `wind_speed` | Wind speed | (time, y, x) | m/s |
+| | `wind_direction` | Wind direction | (time, y, x) | degrees (0-360) |
+| **Wind Components** | `u` | U-component of wind (east-west) | (time, y, x) | m/s |
+| | `v` | V-component of wind (north-south) | (time, y, x) | m/s |
+| | `wind_direction_sin` | Sine of wind direction | (time, y, x) | -1 to 1 |
+| | `wind_direction_cos` | Cosine of wind direction | (time, y, x) | -1 to 1 |
+| **Vegetation** | `ndvi` | Normalized Difference Vegetation Index | (time, y, x) | -1 to 1 |
+| | `lai` | Leaf Area Index | (time, y, x) | 0-7 |
+| | `smi` | Soil Moisture Index | (time, y, x) | 0-1 |
+| | `lst_day` | Land Surface Temperature (day) | (time, y, x) | Kelvin |
+| | `lst_night` | Land Surface Temperature (night) | (time, y, x) | Kelvin |
+| **Fire Metadata** | `ignition_points` | Fire ignition locations | (time, y, x) | timestamped |
+
+### Data Processing Pipeline
+
+The project includes a comprehensive PyTorch-based feature engineering pipeline that:
+
+1. **Loads NetCDF files** - Reads raw wildfire data from disk
+2. **Computes derived features** - Generates additional predictive features:
+   - Terrain Ruggedness Index (TRI)
+   - Vapor Pressure Deficit (VPD)
+   - Fuel moisture proxies
+   - Vegetation stress indices
+   - Neighborhood statistics (3×3, 5×5, 7×7 windows)
+   - Rolling temporal aggregations
+   - Rate of change metrics
+3. **Normalizes features** - Applies standardization and scaling
+4. **Augments data** - Spatial transformations (flips, rotations)
+5. **Batches for training** - Creates efficient DataLoader for PyTorch
+
+See `DATA_FEATURE_ENGINEERING_PLAN.md` for detailed feature engineering documentation.
+
 ## 🚀 Getting Started
 
 ### Prerequisites
