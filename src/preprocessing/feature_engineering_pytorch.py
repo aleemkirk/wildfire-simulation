@@ -695,6 +695,11 @@ class WildfireDatasetWithFeatures(torch.utils.data.Dataset):
         if self.stats is None:
             return features
 
+        # Replace NaN and inf with 0 before normalization
+        features = torch.where(torch.isnan(features) | torch.isinf(features),
+                              torch.zeros_like(features),
+                              features)
+
         # features: [T, C, H, W]
         # Extract mean and std
         mean = torch.tensor(self.stats['mean'], dtype=features.dtype).view(1, -1, 1, 1)  # [1, C, 1, 1]
