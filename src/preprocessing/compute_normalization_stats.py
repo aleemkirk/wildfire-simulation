@@ -141,7 +141,7 @@ def main():
     """Main function."""
     # Configuration
     data_dir = Path('../../data/raw/dataset_64_64_all_10days_final/2022/Albania')
-    output_path = Path('data/processed/normalization_stats.json')
+    output_path = Path('../../data/processed/normalization_stats.json')
 
     # Compute statistics on training set only (70% of data)
     # For now, we'll use all data for simplicity
