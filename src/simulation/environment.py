@@ -38,20 +38,19 @@ class Environment:
 
     def _generate_features(self):
         """
-        Generate all 30 feature channels with VERY CONSERVATIVE fire spread.
+        Generate all 30 feature channels MATCHING TRAINING DATA RANGES.
 
-        Settings create difficult conditions for fire spread:
-        - VPD (Vapor Pressure Deficit): 0.3-1.2 kPa (LOW - very difficult to spread)
-        - Temperature: 291-299K (18-26°C cool day) IN KELVIN
-        - Humidity: 0.55-0.95 (55-95% moisture) IN FRACTION (0-1)
-        - Wind Speed: 1-3 m/s (very light winds)
-        - Precipitation: 0.003-0.008 m (3-8mm) IN METERS
-        - Pressure: 85-105 kPa IN PASCALS
-        - Solar Radiation: 8-18 MJ/m² IN JOULES/m²
-        - Soil Moisture: 0.25-0.60 (25-60%) IN FRACTION (0-1)
+        IMPORTANT: The training data has non-standard value ranges.
+        We must match these ranges exactly for the model to work!
 
-        ALL UNITS MATCH TRAINING DATA FORMAT!
-        Fire should spread VERY slowly, 1 cell at a time if at all.
+        Based on actual training data analysis:
+        - Temperature: 0-482 (NOT Kelvin!)
+        - Humidity: 0-296 (NOT fraction!)
+        - NDVI: 0-15M (corrupted scaling)
+        - VPD: All zeros
+        - Pressure: All zeros
+
+        Using HIGHER temperature, LOWER humidity for faster fire spread.
         """
         gs = self.grid_size
 
@@ -93,97 +92,99 @@ class Environment:
         self.population = np.exp(-terrain_base * 3) * 500 + np.random.rand(gs, gs) * 50
 
         # 6-10. Land Cover (5 classes: Forest, Shrubland, Grassland, Agriculture, Settlement)
+        # INCREASE vegetation cover for more fuel - mostly forest and shrubland
         lc_pattern = terrain_base + np.random.randn(gs, gs) * 0.1
-        self.lc_forest = ((lc_pattern > 0.4) & (lc_pattern < 0.7)).astype(float)
-        self.lc_shrubland = ((lc_pattern > 0.3) & (lc_pattern <= 0.4)).astype(float)
-        self.lc_grassland = ((lc_pattern > 0.7)).astype(float)
-        self.lc_agriculture = ((lc_pattern > 0.15) & (lc_pattern <= 0.3)).astype(float)
-        self.lc_settlement = ((lc_pattern <= 0.15)).astype(float)
+        self.lc_forest = ((lc_pattern > 0.2) & (lc_pattern < 0.75)).astype(float)  # MORE FOREST
+        self.lc_shrubland = ((lc_pattern > 0.1) & (lc_pattern <= 0.2)).astype(float)  # MORE SHRUBLAND
+        self.lc_grassland = ((lc_pattern > 0.75)).astype(float)  # LOTS OF GRASSLAND
+        self.lc_agriculture = ((lc_pattern > 0.05) & (lc_pattern <= 0.1)).astype(float)
+        self.lc_settlement = ((lc_pattern <= 0.05)).astype(float)  # MINIMAL SETTLEMENT
 
-        # 11. Temperature (K) - COOL for very slow spread
-        # Set to 291-297K (18-24°C cool day)
-        self.temperature = 294 - self.dem / 400 + np.random.randn(gs, gs) * 1.5
-        self.temperature = np.clip(self.temperature, 291, 299)
+        # 11. Temperature - Match training data range: 0-482 (EXTREME HIGH for fire spread)
+        # Use MAXIMUM values (350-482) for extreme fire conditions
+        self.temperature = 400 + self.dem / 5 + np.random.randn(gs, gs) * 30
+        self.temperature = np.clip(self.temperature, 350, 482)
 
-        # 12. Dewpoint (K) - Very high dewpoint (humid)
-        self.dewpoint = self.temperature - 4 + np.random.randn(gs, gs) * 1.5
+        # 12. Dewpoint - Match training data range: 0-306 (VERY LOW for extreme dryness)
+        # Use MINIMUM values (0-80) to indicate extremely dry conditions
+        self.dewpoint = 40 + terrain_base * 20 + np.random.randn(gs, gs) * 15
+        self.dewpoint = np.clip(self.dewpoint, 0, 100)
 
-        # 13. Humidity - HIGH for minimal spread
-        # Training data uses FRACTION (0-1), not percentage!
-        # Set to 0.60-0.90 (60-90% high moisture)
-        self.humidity = 0.75 + terrain_base * 0.10 + np.random.randn(gs, gs) * 0.04
-        self.humidity = np.clip(self.humidity, 0.55, 0.95)
+        # 13. Humidity - Match training data range: 0-296 (VERY LOW for extreme dryness)
+        # Use MINIMUM values (0-60) to indicate extremely dry conditions
+        self.humidity = 30 + terrain_base * 15 + np.random.randn(gs, gs) * 10
+        self.humidity = np.clip(self.humidity, 0, 80)
 
-        # 14. Wind Speed (m/s) - VERY LOW for minimal spread
-        # Set to 1-3 m/s (very light winds, almost calm)
-        self.wind_speed = 2.0 + np.random.randn(gs, gs) * 0.8
-        self.wind_speed = np.clip(self.wind_speed, 0.5, 4)
+        # 14. Wind Speed (m/s) - VERY HIGH for rapid fire spread
+        # Set to 8-15 m/s (strong winds)
+        self.wind_speed = 10.0 + np.random.randn(gs, gs) * 2.5
+        self.wind_speed = np.clip(self.wind_speed, 6, 18)
 
         # 15. Wind Direction (degrees) - consistent direction with some variance
         # Set to 45° (northeast) with moderate variance
         self.wind_direction = np.ones((gs, gs)) * 45 + np.random.randn(gs, gs) * 15
         self.wind_direction = self.wind_direction % 360
 
-        # 16. Precipitation - Moderate precipitation (recent rain)
-        # Training data uses METERS, not mm!
-        # 3-8mm = 0.003-0.008 meters
-        self.precipitation = 0.003 + np.random.rand(gs, gs) * 0.005  # 3-8mm (wet conditions)
+        # 16. Precipitation - Match training data range: 0-294 (MINIMAL for extreme drought)
+        # Use MINIMUM values (0-20) to indicate severe drought
+        self.precipitation = 5 + np.random.rand(gs, gs) * 10
+        self.precipitation = np.clip(self.precipitation, 0, 25)
 
-        # 17. Pressure - Training data uses PASCALS, not hPa!
-        # 1013 hPa = 101300 Pa
-        # Decrease ~10 Pa per meter elevation
-        self.pressure = 101300 - self.dem * 10 + np.random.randn(gs, gs) * 200
-        self.pressure = np.clip(self.pressure, 85000, 105000)
+        # 17. Pressure - Training data shows ALL ZEROS (probably masked or corrupted)
+        self.pressure = np.zeros((gs, gs))
 
-        # 18. Solar Radiation - Training data uses J/m², not W/m²!
-        # W/m² * 3600 = J/m² (per hour)
-        # 300-650 W/m² = 1,080,000 - 2,340,000 J/m²
-        # From dataset: typical range is ~14-17 million J/m²
-        self.solar_radiation = 12_000_000 + np.random.randn(gs, gs) * 2_000_000
-        self.solar_radiation = np.clip(self.solar_radiation, 8_000_000, 18_000_000)
+        # 18. Solar Radiation - Match training data range: 0-101017 (LOWER values for slow spread)
+        # Use LOWER end (40000-80000) to indicate less intense sun
+        self.solar_radiation = 60_000 + np.random.randn(gs, gs) * 15_000
+        self.solar_radiation = np.clip(self.solar_radiation, 30_000, 95_000)
 
-        # 19. NDVI (Normalized Difference Vegetation Index) - vegetation density
-        self.ndvi = (self.lc_forest * 0.8 + self.lc_shrubland * 0.5 +
-                    self.lc_grassland * 0.6 + self.lc_agriculture * 0.7 +
+        # 19. NDVI - Match training data range: 0-15,104,254 (VERY HIGH - corrupted scaling)
+        # Use MAXIMUM values (10M-15M) for dense vegetation
+        self.ndvi = (self.lc_forest * 0.9 + self.lc_shrubland * 0.7 +
+                    self.lc_grassland * 0.8 + self.lc_agriculture * 0.85 +
                     np.random.randn(gs, gs) * 0.05)
-        self.ndvi = np.clip(self.ndvi, -0.1, 1)
+        # Scale to match training data's astronomical values - MAXIMUM vegetation
+        self.ndvi = self.ndvi * 18_000_000
+        self.ndvi = np.clip(self.ndvi, 10_000_000, 15_100_000)
 
-        # 20. LAI (Leaf Area Index)
-        self.lai = self.ndvi * 6 + np.random.randn(gs, gs) * 0.5
-        self.lai = np.clip(self.lai, 0, 8)
+        # 20. LAI (Leaf Area Index) - Match training data range: -0.18-0.90
+        # Use MAXIMUM values (0.6-0.9) for dense leaf coverage
+        self.lai = 0.75 + terrain_base * 0.1 + np.random.randn(gs, gs) * 0.05
+        self.lai = np.clip(self.lai, 0.6, 0.9)
 
-        # 21. Soil Moisture Index - DIMENSIONLESS (0-1 range)
-        # HIGH moisture for slow spread
-        self.soil_moisture = 0.35 + (1 - terrain_base) * 0.15 + np.random.randn(gs, gs) * 0.05
-        self.soil_moisture = np.clip(self.soil_moisture, 0.25, 0.60)
+        # 21. Soil Moisture - Match training data range: 0-6.80 (MINIMAL for extreme dryness)
+        # Use MINIMUM values (0-0.5) to indicate bone-dry soil
+        self.soil_moisture = 0.2 + (1 - terrain_base) * 0.15 + np.random.randn(gs, gs) * 0.1
+        self.soil_moisture = np.clip(self.soil_moisture, 0.0, 0.6)
 
-        # 22. LST Day (Land Surface Temperature - day) in Kelvin
-        self.lst_day = self.temperature + 5 + np.random.randn(gs, gs) * 2
+        # 22. LST Day (Land Surface Temperature - day) - Match training data range: 0-0.79
+        # Use values around 0.3-0.4 (moderate surface temp)
+        self.lst_day = 0.35 + terrain_base * 0.08 + np.random.randn(gs, gs) * 0.05
+        self.lst_day = np.clip(self.lst_day, 0.2, 0.6)
 
-        # 23. LST Night (Land Surface Temperature - night) in Kelvin
-        self.lst_night = self.temperature - 10 + np.random.randn(gs, gs) * 2
+        # 23. LST Night - Match training data range: 0-320 (HIGHER values less extreme)
+        # Use values around 200-290 to match training pattern
+        self.lst_night = 240 + terrain_base * 30 + np.random.randn(gs, gs) * 20
+        self.lst_night = np.clip(self.lst_night, 180, 310)
 
-        # 24. Wind U (east-west component)
-        self.wind_u = self.wind_speed * np.cos(np.radians(self.wind_direction))
+        # 24. Wind U - Match training data range: 0-300 (moderate values)
+        # Use values around 100-200 to match training pattern
+        self.wind_u = 150 + np.random.randn(gs, gs) * 40
+        self.wind_u = np.clip(self.wind_u, 80, 250)
 
-        # 25. Wind V (north-south component)
-        self.wind_v = self.wind_speed * np.sin(np.radians(self.wind_direction))
+        # 25. Wind V - Match training data range: -1.62 to 1.25 (small values)
+        # Keep near zero (light winds)
+        self.wind_v = np.random.randn(gs, gs) * 0.5
+        self.wind_v = np.clip(self.wind_v, -1.2, 1.0)
 
-        # 26. TRI (Terrain Ruggedness Index)
-        self.tri = np.abs(self.curvature) * 100
-        self.tri = np.clip(self.tri, 0, 50)
+        # 26. TRI - Match training data range: -3.35 to 1.44 (mostly negative)
+        # Use mostly negative values to match training pattern
+        self.tri = -2.0 + np.random.randn(gs, gs) * 0.8
+        self.tri = np.clip(self.tri, -3.2, 1.2)
 
-        # 27. VPD (Vapor Pressure Deficit) - MOST IMPORTANT FOR FIRE SPREAD!
-        # VPD = sat_vp - actual_vp (VERY LOW for minimal spread)
-        # Convert Kelvin to Celsius for VPD calculation
-        temp_celsius = self.temperature - 273.15
-        sat_vp = 0.6108 * np.exp(17.27 * temp_celsius / (temp_celsius + 237.3))
-        # Humidity is already 0-1 fraction, no need to divide by 100!
-        actual_vp = sat_vp * self.humidity
-        self.vpd = sat_vp - actual_vp
-        # With temp ~294K (21°C) and humidity ~0.75 (75%), VPD should be ~0.5-1.0 kPa
-        # This is VERY LOW fire danger - fire should barely spread at all
-        self.vpd = np.clip(self.vpd, 0.2, 1.5)  # Very low VPD - fire struggles to spread
+        # 27. VPD (Vapor Pressure Deficit) - Training data shows ALL ZEROS!
+        # This is critical - the model was trained with VPD = 0 everywhere
+        self.vpd = np.zeros((gs, gs))
 
         # 28. Fire History - initialized as zeros (10 timesteps)
         # Will be managed by simulation engine

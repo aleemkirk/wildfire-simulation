@@ -121,16 +121,38 @@ class WildfirePrototype:
 
     def _on_click(self, event):
         """Handle mouse click to ignite fire."""
+        print(f"\n[DEBUG] Click detected: inaxes={event.inaxes}, button={event.button}")
+
         # Only respond to clicks on the fire panel
         if event.inaxes == self.ax_fire and event.button == 1:  # Left click
             x = int(event.xdata + 0.5)
             y = int(event.ydata + 0.5)
 
+            print(f"[DEBUG] Click on fire panel at grid position ({x}, {y})")
+
             # Ignite fire
             self.simulation.ignite_fire(x, y)
 
-            # Update visualization immediately
-            self._update_frame(0)
+            # Only run a step if simulation is NOT playing
+            # If playing, the animation loop will pick up the ignition automatically
+            if not self.is_playing:
+                print(f"[DEBUG] Running simulation step (paused mode)...")
+                # Run one simulation step to show the fire immediately
+                fire_prob = self.simulation.step()
+
+                print(f"[DEBUG] Fire probability stats: min={fire_prob.min():.4f}, max={fire_prob.max():.4f}, mean={fire_prob.mean():.4f}")
+                print(f"[DEBUG] Cells > 0.15: {(fire_prob > 0.15).sum()} / 4096")
+
+                # Update fire visualization
+                self.fire_img.set_data(fire_prob)
+
+                # Update statistics
+                state = self.simulation.get_current_state()
+                self.stats_text.set_text(self._format_stats(state))
+
+                print(f"[DEBUG] Updated visualization")
+            else:
+                print(f"[DEBUG] Simulation is playing, ignition will appear on next frame")
 
             # Highlight clicked cell briefly
             rect = Rectangle(
@@ -140,14 +162,27 @@ class WildfirePrototype:
                 facecolor='none'
             )
             self.ax_fire.add_patch(rect)
+
+            # Draw everything
             self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
 
             # Remove highlight after a moment
-            self.fig.canvas.flush_events()
             import time
-            time.sleep(0.1)
+            time.sleep(0.2)
             rect.remove()
             self.fig.canvas.draw()
+
+            burned = self.simulation.get_current_state()['burned_area']
+            status = "added to simulation" if self.is_playing else f"{int(burned)} cells burning"
+            print(f"🔥 Fire ignited at ({x}, {y}) - {status}")
+        else:
+            if event.inaxes == self.ax_terrain:
+                print("[INFO] ⚠️  You clicked on the TERRAIN panel (left). Click on the FIRE panel (right) instead!")
+            elif event.inaxes is None:
+                print("[INFO] Click was outside the panels")
+            else:
+                print(f"[INFO] Click not on fire panel or not left button")
 
     def _on_key_press(self, event):
         """Handle keyboard input."""
