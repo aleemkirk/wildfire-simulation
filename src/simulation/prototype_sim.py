@@ -85,11 +85,12 @@ class WildfirePrototype:
         plt.colorbar(self.terrain_img, ax=self.ax_terrain, label='Elevation (m)')
 
         # Right panel: Fire spread
+        # Use vmax=0.2 to make fires more visible (most fires are 0.005-0.15 probability)
         self.fire_img = self.ax_fire.imshow(
             state['fire_prob'],
             cmap='hot',
             vmin=0,
-            vmax=1,
+            vmax=0.2,  # Adjusted from 1.0 to show low probabilities as brighter
             interpolation='nearest'
         )
         self.ax_fire.set_title('Fire Probability', fontsize=14, fontweight='bold')

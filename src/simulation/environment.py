@@ -288,13 +288,120 @@ class Environment:
 
         return torch.from_numpy(features).float()
 
-    def update_weather(self, **kwargs):
+    def evolve_dynamic_features(self, timestep):
         """
-        Update weather parameters dynamically.
+        Evolve dynamic environmental features over time.
+
+        Simulates realistic temporal changes in weather and vegetation conditions.
+        Static features (terrain, land cover, etc.) remain unchanged.
 
         Args:
-            temperature: Temperature in °C
-            humidity: Humidity in %
+            timestep: Current simulation timestep
+        """
+        gs = self.grid_size
+
+        # Time-based variation patterns
+        # Use sine waves with different periods to create realistic fluctuations
+
+        # ========================================================================
+        # WEATHER FEATURES - Time-varying
+        # ========================================================================
+
+        # Temperature (diurnal cycle + random fluctuations)
+        # Slow oscillation over ~20 timesteps (simulating day/night cycle)
+        temp_cycle = np.sin(timestep * 2 * np.pi / 20) * 3  # ±3K variation
+        temp_noise = np.random.randn(gs, gs) * 0.5  # Small random changes
+        self.temperature += temp_cycle + temp_noise
+        self.temperature = np.clip(self.temperature, 295, 307)  # Stay in training range
+
+        # Dewpoint (tracks temperature but with lag)
+        self.dewpoint = self.temperature - 40 + np.random.randn(gs, gs) * 2
+        self.dewpoint = np.clip(self.dewpoint, 250, 270)
+
+        # Relative Humidity (inversely related to temperature)
+        # Humidity drops when temperature rises
+        humidity_change = -temp_cycle * 0.01 + np.random.randn(gs, gs) * 0.005
+        self.humidity += humidity_change
+        self.humidity = np.clip(self.humidity, 0.05, 0.20)  # Slightly expanded upper range
+
+        # Wind Speed (turbulent changes)
+        # Random walk with mean reversion to high values
+        wind_change = np.random.randn(gs, gs) * 0.3 + (4.5 - self.wind_speed) * 0.05
+        self.wind_speed += wind_change
+        self.wind_speed = np.clip(self.wind_speed, 3.5, 5.18)
+
+        # Wind Direction (slow rotation + turbulence)
+        # Main direction shifts slowly, local turbulence adds variation
+        direction_shift = np.sin(timestep * 2 * np.pi / 30) * 15  # ±15° shift over 30 timesteps
+        direction_noise = np.random.randn(gs, gs) * 10  # Local turbulence
+        self.wind_direction += direction_shift + direction_noise
+        self.wind_direction = self.wind_direction % 360
+
+        # Update wind components based on new speed and direction
+        wind_dir_rad = np.radians(self.wind_direction)
+        self.wind_u = -self.wind_speed * np.sin(wind_dir_rad)
+        self.wind_v = -self.wind_speed * np.cos(wind_dir_rad)
+        self.wind_u = np.clip(self.wind_u, -1.6, 3.9)
+        self.wind_v = np.clip(self.wind_v, -3.8, 3.6)
+
+        # Precipitation (rare events)
+        # Very low baseline with occasional small increases
+        precip_event = 1.0 if np.random.rand() < 0.05 else 0.0  # 5% chance of rain
+        self.precipitation = precip_event * 0.002 + np.random.rand(gs, gs) * 0.0005
+        self.precipitation = np.clip(self.precipitation, 0.0, 0.0038)
+
+        # Surface Pressure (slowly varying with temperature)
+        # Decreases when temperature rises (thermal low)
+        pressure_change = -temp_cycle * 50 + np.random.randn(gs, gs) * 100
+        self.pressure += pressure_change
+        self.pressure = np.clip(self.pressure, 85000, 101212)
+
+        # Solar Radiation (diurnal cycle)
+        # High during day, zero at night
+        solar_cycle = (np.sin(timestep * 2 * np.pi / 20) + 1) / 2  # 0 to 1
+        self.solar_radiation = 14_000_000 * solar_cycle + np.random.randn(gs, gs) * 300_000
+        self.solar_radiation = np.clip(self.solar_radiation, 0, 15_869_024)
+
+        # ========================================================================
+        # VEGETATION FEATURES - Slowly evolving
+        # ========================================================================
+
+        # NDVI (decreases slightly over time due to drying/burning)
+        # Very slow degradation
+        ndvi_change = -0.001 + np.random.randn(gs, gs) * 0.002
+        self.ndvi += ndvi_change
+        self.ndvi = np.clip(self.ndvi, 0.70, 0.90)
+
+        # LAI (follows NDVI)
+        self.lai = self.ndvi * 7 + 0.5
+        self.lai = np.clip(self.lai, 5.0, 6.8)
+
+        # Soil Moisture (decreases with high temperature, increases with rain)
+        moisture_change = -0.002 * (self.temperature - 295) / 10  # Evaporation
+        moisture_change += self.precipitation * 50  # Rain adds moisture
+        moisture_change += np.random.randn(gs, gs) * 0.005
+        self.soil_moisture += moisture_change
+        self.soil_moisture = np.clip(self.soil_moisture, 0.03, 0.20)
+
+        # LST Day (tracks air temperature + solar radiation)
+        self.lst_day = self.temperature + 12 + solar_cycle * 5 + np.random.randn(gs, gs) * 2
+        self.lst_day = np.clip(self.lst_day, 305, 320)
+
+        # LST Night (cooler than day)
+        self.lst_night = self.temperature - 2 + np.random.randn(gs, gs) * 2
+        self.lst_night = np.clip(self.lst_night, 290, 302)
+
+        # VPD (Vapor Pressure Deficit) - remains zero to match training
+        # Training data has VPD issues, so we keep it at zero
+        self.vpd = np.zeros((gs, gs))
+
+    def update_weather(self, **kwargs):
+        """
+        Update weather parameters dynamically (manual override).
+
+        Args:
+            temperature: Temperature in K
+            humidity: Humidity in fraction (0-1)
             wind_speed: Wind speed in m/s
             wind_direction: Wind direction in degrees
             etc.
@@ -308,5 +415,6 @@ class Environment:
         if 'wind_direction' in kwargs:
             self.wind_direction = np.ones((self.grid_size, self.grid_size)) * kwargs['wind_direction']
             # Update wind components
-            self.wind_u = self.wind_speed * np.cos(np.radians(self.wind_direction))
-            self.wind_v = self.wind_speed * np.sin(np.radians(self.wind_direction))
+            wind_dir_rad = np.radians(self.wind_direction)
+            self.wind_u = -self.wind_speed * np.sin(wind_dir_rad)
+            self.wind_v = -self.wind_speed * np.cos(wind_dir_rad)

@@ -122,6 +122,9 @@ class WildfireSimulation:
         Returns:
             np.ndarray: Fire probability map [H, W]
         """
+        # 0. Evolve dynamic environmental features over time
+        self.environment.evolve_dynamic_features(self.timestep)
+
         # 1. Get environment features (28 channels)
         env_features = self.environment.get_feature_tensor()  # [28, H, W]
 
@@ -155,11 +158,12 @@ class WildfireSimulation:
         with torch.no_grad():
             prediction = self.model(model_input)  # [1, 1, 10, H, W]
 
-        # 7. Get next timestep prediction (use last timestep)
+        # 7. Get next timestep prediction (use LAST timestep - 10-step ahead)
         next_fire_logits = prediction[0, 0, -1]  # [H, W]
         next_fire_prob = torch.sigmoid(next_fire_logits).cpu()  # [H, W]
-        # EXTREMELY LOW threshold (0.5%) to capture all potential fire spread
-        # This ensures even weak fire signals get fed back into the model
+        # Threshold at 0.5% to capture low-probability spread
+        # The last prediction (index -1) represents accumulated spread over 10 timesteps,
+        # which creates a better continuous simulation effect
         next_fire_binary = (next_fire_prob > 0.005).float()
 
         # 8. Update fire history buffer (rolling window)
