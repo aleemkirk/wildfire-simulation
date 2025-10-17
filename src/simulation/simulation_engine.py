@@ -155,9 +155,9 @@ class WildfireSimulation:
         # 7. Get next timestep prediction (use last timestep)
         next_fire_logits = prediction[0, 0, -1]  # [H, W]
         next_fire_prob = torch.sigmoid(next_fire_logits).cpu()  # [H, W]
-        # Lower threshold to 0.10 (10%) to make fire more visible
-        # Model predictions are generally lower due to training data characteristics
-        next_fire_binary = (next_fire_prob > 0.10).float()
+        # VERY LOW threshold (5%) for maximum fire spread visibility
+        # Any probability above 5% will be considered as fire
+        next_fire_binary = (next_fire_prob > 0.05).float()
 
         # 8. Update fire history buffer (rolling window)
         self.fire_history = torch.cat([

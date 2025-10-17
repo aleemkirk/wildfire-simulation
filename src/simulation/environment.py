@@ -38,19 +38,18 @@ class Environment:
 
     def _generate_features(self):
         """
-        Generate all 30 feature channels MATCHING TRAINING DATA RANGES.
+        Generate all 30 feature channels with MAXIMUM FIRE SPREAD CONDITIONS.
 
-        IMPORTANT: The training data has non-standard value ranges.
-        We must match these ranges exactly for the model to work!
+        ABSOLUTE MAXIMUM VALUES - EXTREME FIRE DANGER:
+        All variables set to their MAXIMUM/MINIMUM extremes to create
+        the most aggressive fire spread possible.
 
-        Based on actual training data analysis:
-        - Temperature: 0-482 (NOT Kelvin!)
-        - Humidity: 0-296 (NOT fraction!)
-        - NDVI: 0-15M (corrupted scaling)
-        - VPD: All zeros
-        - Pressure: All zeros
-
-        Using HIGHER temperature, LOWER humidity for faster fire spread.
+        This represents catastrophic fire conditions:
+        - MAXIMUM temperature (approaching limit)
+        - MINIMUM humidity (bone dry)
+        - MAXIMUM wind (hurricane force)
+        - ZERO precipitation (extreme drought)
+        - MAXIMUM vegetation (dense fuel)
         """
         gs = self.grid_size
 
@@ -100,82 +99,82 @@ class Environment:
         self.lc_agriculture = ((lc_pattern > 0.05) & (lc_pattern <= 0.1)).astype(float)
         self.lc_settlement = ((lc_pattern <= 0.05)).astype(float)  # MINIMAL SETTLEMENT
 
-        # 11. Temperature - Match training data range: 0-482 (EXTREME HIGH for fire spread)
-        # Use MAXIMUM values (350-482) for extreme fire conditions
-        self.temperature = 400 + self.dem / 5 + np.random.randn(gs, gs) * 30
-        self.temperature = np.clip(self.temperature, 350, 482)
+        # 11. Temperature - ABSOLUTE MAXIMUM (near upper limit)
+        # Maximum possible values for catastrophic heat
+        self.temperature = 470 + np.random.randn(gs, gs) * 8
+        self.temperature = np.clip(self.temperature, 460, 482)
 
-        # 12. Dewpoint - Match training data range: 0-306 (VERY LOW for extreme dryness)
-        # Use MINIMUM values (0-80) to indicate extremely dry conditions
-        self.dewpoint = 40 + terrain_base * 20 + np.random.randn(gs, gs) * 15
-        self.dewpoint = np.clip(self.dewpoint, 0, 100)
+        # 12. Dewpoint - ABSOLUTE MINIMUM (completely dry)
+        # Zero dewpoint = no moisture at all
+        self.dewpoint = 0 + np.random.randn(gs, gs) * 5
+        self.dewpoint = np.clip(self.dewpoint, 0, 15)
 
-        # 13. Humidity - Match training data range: 0-296 (VERY LOW for extreme dryness)
-        # Use MINIMUM values (0-60) to indicate extremely dry conditions
-        self.humidity = 30 + terrain_base * 15 + np.random.randn(gs, gs) * 10
-        self.humidity = np.clip(self.humidity, 0, 80)
+        # 13. Humidity - ABSOLUTE MINIMUM (zero moisture)
+        # Completely dry air, no humidity whatsoever
+        self.humidity = 0 + np.random.randn(gs, gs) * 3
+        self.humidity = np.clip(self.humidity, 0, 10)
 
-        # 14. Wind Speed (m/s) - VERY HIGH for rapid fire spread
-        # Set to 8-15 m/s (strong winds)
-        self.wind_speed = 10.0 + np.random.randn(gs, gs) * 2.5
-        self.wind_speed = np.clip(self.wind_speed, 6, 18)
+        # 14. Wind Speed - ABSOLUTE MAXIMUM (hurricane-force winds)
+        # Maximum wind speed for explosive fire spread
+        self.wind_speed = 25.0 + np.random.randn(gs, gs) * 5
+        self.wind_speed = np.clip(self.wind_speed, 20, 35)
 
         # 15. Wind Direction (degrees) - consistent direction with some variance
         # Set to 45° (northeast) with moderate variance
         self.wind_direction = np.ones((gs, gs)) * 45 + np.random.randn(gs, gs) * 15
         self.wind_direction = self.wind_direction % 360
 
-        # 16. Precipitation - Match training data range: 0-294 (MINIMAL for extreme drought)
-        # Use MINIMUM values (0-20) to indicate severe drought
-        self.precipitation = 5 + np.random.rand(gs, gs) * 10
-        self.precipitation = np.clip(self.precipitation, 0, 25)
+        # 16. Precipitation - ABSOLUTE ZERO (complete drought)
+        # No rain whatsoever - bone dry
+        self.precipitation = 0 + np.random.rand(gs, gs) * 1
+        self.precipitation = np.clip(self.precipitation, 0, 2)
 
         # 17. Pressure - Training data shows ALL ZEROS (probably masked or corrupted)
         self.pressure = np.zeros((gs, gs))
 
-        # 18. Solar Radiation - Match training data range: 0-101017 (LOWER values for slow spread)
-        # Use LOWER end (40000-80000) to indicate less intense sun
-        self.solar_radiation = 60_000 + np.random.randn(gs, gs) * 15_000
-        self.solar_radiation = np.clip(self.solar_radiation, 30_000, 95_000)
+        # 18. Solar Radiation - ABSOLUTE MAXIMUM (intense sun)
+        # Maximum solar intensity for extreme heat
+        self.solar_radiation = 95_000 + np.random.randn(gs, gs) * 4_000
+        self.solar_radiation = np.clip(self.solar_radiation, 90_000, 101_000)
 
-        # 19. NDVI - Match training data range: 0-15,104,254 (VERY HIGH - corrupted scaling)
-        # Use MAXIMUM values (10M-15M) for dense vegetation
-        self.ndvi = (self.lc_forest * 0.9 + self.lc_shrubland * 0.7 +
-                    self.lc_grassland * 0.8 + self.lc_agriculture * 0.85 +
-                    np.random.randn(gs, gs) * 0.05)
-        # Scale to match training data's astronomical values - MAXIMUM vegetation
-        self.ndvi = self.ndvi * 18_000_000
-        self.ndvi = np.clip(self.ndvi, 10_000_000, 15_100_000)
+        # 19. NDVI - ABSOLUTE MAXIMUM (densest vegetation possible)
+        # Maximum vegetation density for maximum fuel
+        self.ndvi = (self.lc_forest * 1.0 + self.lc_shrubland * 1.0 +
+                    self.lc_grassland * 1.0 + self.lc_agriculture * 1.0 +
+                    np.random.randn(gs, gs) * 0.01)
+        # Scale to MAXIMUM training data values
+        self.ndvi = self.ndvi * 20_000_000
+        self.ndvi = np.clip(self.ndvi, 14_000_000, 15_104_254)
 
-        # 20. LAI (Leaf Area Index) - Match training data range: -0.18-0.90
-        # Use MAXIMUM values (0.6-0.9) for dense leaf coverage
-        self.lai = 0.75 + terrain_base * 0.1 + np.random.randn(gs, gs) * 0.05
-        self.lai = np.clip(self.lai, 0.6, 0.9)
+        # 20. LAI - ABSOLUTE MAXIMUM (densest leaf coverage)
+        # Maximum leaf area for maximum fuel
+        self.lai = 0.88 + np.random.randn(gs, gs) * 0.015
+        self.lai = np.clip(self.lai, 0.85, 0.90)
 
-        # 21. Soil Moisture - Match training data range: 0-6.80 (MINIMAL for extreme dryness)
-        # Use MINIMUM values (0-0.5) to indicate bone-dry soil
-        self.soil_moisture = 0.2 + (1 - terrain_base) * 0.15 + np.random.randn(gs, gs) * 0.1
-        self.soil_moisture = np.clip(self.soil_moisture, 0.0, 0.6)
+        # 21. Soil Moisture - ABSOLUTE ZERO (completely dry soil)
+        # Zero soil moisture for extreme fire conditions
+        self.soil_moisture = 0.0 + np.random.randn(gs, gs) * 0.02
+        self.soil_moisture = np.clip(self.soil_moisture, 0.0, 0.05)
 
-        # 22. LST Day (Land Surface Temperature - day) - Match training data range: 0-0.79
-        # Use values around 0.3-0.4 (moderate surface temp)
-        self.lst_day = 0.35 + terrain_base * 0.08 + np.random.randn(gs, gs) * 0.05
-        self.lst_day = np.clip(self.lst_day, 0.2, 0.6)
+        # 22. LST Day - ABSOLUTE MAXIMUM (extreme surface heat)
+        # Maximum daytime surface temperature
+        self.lst_day = 0.75 + np.random.randn(gs, gs) * 0.03
+        self.lst_day = np.clip(self.lst_day, 0.72, 0.79)
 
-        # 23. LST Night - Match training data range: 0-320 (HIGHER values less extreme)
-        # Use values around 200-290 to match training pattern
-        self.lst_night = 240 + terrain_base * 30 + np.random.randn(gs, gs) * 20
-        self.lst_night = np.clip(self.lst_night, 180, 310)
+        # 23. LST Night - ABSOLUTE MAXIMUM (hot nights)
+        # Maximum nighttime temperature for continuous fire
+        self.lst_night = 310 + np.random.randn(gs, gs) * 8
+        self.lst_night = np.clip(self.lst_night, 300, 320)
 
-        # 24. Wind U - Match training data range: 0-300 (moderate values)
-        # Use values around 100-200 to match training pattern
-        self.wind_u = 150 + np.random.randn(gs, gs) * 40
-        self.wind_u = np.clip(self.wind_u, 80, 250)
+        # 24. Wind U - ABSOLUTE MAXIMUM (extreme easterly winds)
+        # Maximum wind component for rapid fire spread
+        self.wind_u = 280 + np.random.randn(gs, gs) * 15
+        self.wind_u = np.clip(self.wind_u, 270, 300)
 
-        # 25. Wind V - Match training data range: -1.62 to 1.25 (small values)
-        # Keep near zero (light winds)
-        self.wind_v = np.random.randn(gs, gs) * 0.5
-        self.wind_v = np.clip(self.wind_v, -1.2, 1.0)
+        # 25. Wind V - MAXIMUM positive (strong southerly component)
+        # Strong winds in both directions
+        self.wind_v = 1.1 + np.random.randn(gs, gs) * 0.1
+        self.wind_v = np.clip(self.wind_v, 1.0, 1.25)
 
         # 26. TRI - Match training data range: -3.35 to 1.44 (mostly negative)
         # Use mostly negative values to match training pattern
