@@ -95,22 +95,25 @@ class WildfireSimulation:
 
         print(f"✓ Loaded normalization stats ({stats['num_channels']} channels)")
 
-    def ignite_fire(self, x, y):
+    def ignite_fire(self, x, y, strength=500.0):
         """
         Start a fire at grid position (x, y).
 
         Args:
             x: X coordinate (0 to grid_size-1)
             y: Y coordinate (0 to grid_size-1)
+            strength: Ignition strength (default 500.0)
+                     Training data uses values 5-825, with typical values around 500-800
         """
         if 0 <= x < self.grid_size and 0 <= y < self.grid_size:
-            # Add ignition point
-            self.ignition_points[y, x] = 1.0
+            # Add ignition point with strong signal (matching training data scale)
+            # Training data uses values like 5, 136, 173, 672, 825
+            self.ignition_points[y, x] = strength
 
             # Add to current fire state (most recent timestep)
             self.fire_history[-1, y, x] = 1.0
 
-            print(f"🔥 Fire ignited at ({x}, {y})")
+            print(f"🔥 Fire ignited at ({x}, {y}) with strength {strength}")
 
     def step(self):
         """
@@ -155,9 +158,9 @@ class WildfireSimulation:
         # 7. Get next timestep prediction (use last timestep)
         next_fire_logits = prediction[0, 0, -1]  # [H, W]
         next_fire_prob = torch.sigmoid(next_fire_logits).cpu()  # [H, W]
-        # VERY LOW threshold (5%) for maximum fire spread visibility
-        # Any probability above 5% will be considered as fire
-        next_fire_binary = (next_fire_prob > 0.05).float()
+        # EXTREMELY LOW threshold (0.5%) to capture all potential fire spread
+        # This ensures even weak fire signals get fed back into the model
+        next_fire_binary = (next_fire_prob > 0.005).float()
 
         # 8. Update fire history buffer (rolling window)
         self.fire_history = torch.cat([
