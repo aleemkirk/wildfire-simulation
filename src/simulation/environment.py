@@ -36,20 +36,49 @@ class Environment:
         # Generate all 30 features
         self._generate_features()
 
+    def _compute_tri_like_training(self, dem: torch.Tensor) -> torch.Tensor:
+        """
+        Compute TRI exactly like the training pipeline does.
+
+        Training TRI has range 0-482, which suggests it's computed differently
+        than the standard TRI formula. This matches the FeatureEngineering class.
+        """
+        import torch.nn.functional as F
+
+        # Create 3x3 averaging kernel
+        kernel = torch.ones(1, 1, 3, 3, dtype=torch.float32) / 9.0
+
+        # Add dimensions
+        dem_4d = dem.unsqueeze(0).unsqueeze(0)
+
+        # Compute mean of neighbors
+        dem_mean = F.conv2d(dem_4d, kernel, padding=1)
+
+        # Compute squared differences
+        diff_sq = (dem_4d - dem_mean) ** 2
+
+        # Average and take sqrt
+        tri = torch.sqrt(F.conv2d(diff_sq, kernel, padding=1))
+
+        return tri.squeeze()
+
     def _generate_features(self):
         """
-        Generate all 30 feature channels with MAXIMUM FIRE SPREAD CONDITIONS.
+        Generate all 30 feature channels with EXTREME FIRE SPREAD CONDITIONS.
 
-        ABSOLUTE MAXIMUM VALUES - EXTREME FIRE DANGER:
-        All variables set to their MAXIMUM/MINIMUM extremes to create
-        the most aggressive fire spread possible.
+        ⚠️  EXTREME FIRE DANGER - ALL VALUES AT MAXIMUM (within training ranges)
 
-        This represents catastrophic fire conditions:
-        - MAXIMUM temperature (approaching limit)
-        - MINIMUM humidity (bone dry)
-        - MAXIMUM wind (hurricane force)
-        - ZERO precipitation (extreme drought)
-        - MAXIMUM vegetation (dense fuel)
+        This represents CATASTROPHIC fire conditions:
+        - Temperature: 32-34°C (HOT!)
+        - Humidity: 5-15% (BONE DRY!)
+        - Wind: 4-5.2 m/s (STRONG!)
+        - Vegetation: NDVI 0.75-0.90 (MAXIMUM FUEL!)
+        - LAI: 5.5-6.8 (DENSE FOLIAGE!)
+        - Soil moisture: 5-15% (PARCHED!)
+        - Solar radiation: 14-15.8 MJ/m² (INTENSE SUN!)
+        - LST Day: 37-47°C (SCORCHING SURFACE!)
+
+        All values stay within training data ranges for valid model predictions.
         """
         gs = self.grid_size
 
@@ -99,90 +128,106 @@ class Environment:
         self.lc_agriculture = ((lc_pattern > 0.05) & (lc_pattern <= 0.1)).astype(float)
         self.lc_settlement = ((lc_pattern <= 0.05)).astype(float)  # MINIMAL SETTLEMENT
 
-        # 11. Temperature - ABSOLUTE MAXIMUM (near upper limit)
-        # Maximum possible values for catastrophic heat
-        self.temperature = 470 + np.random.randn(gs, gs) * 8
-        self.temperature = np.clip(self.temperature, 460, 482)
+        # ========================================================================
+        # WEATHER FEATURES - EXTREME FIRE CONDITIONS (within training ranges)
+        # ========================================================================
 
-        # 12. Dewpoint - ABSOLUTE MINIMUM (completely dry)
-        # Zero dewpoint = no moisture at all
-        self.dewpoint = 0 + np.random.randn(gs, gs) * 5
-        self.dewpoint = np.clip(self.dewpoint, 0, 15)
+        # Temperature (t2m) - Training range: 0-307 K
+        # MAXIMUM fire danger: use UPPER limit (305-307K = 32-34°C) - HOT!
+        self.temperature = 300 + terrain_base * 5 + np.random.randn(gs, gs) * 2
+        self.temperature = np.clip(self.temperature, 298, 307)
 
-        # 13. Humidity - ABSOLUTE MINIMUM (zero moisture)
-        # Completely dry air, no humidity whatsoever
-        self.humidity = 0 + np.random.randn(gs, gs) * 3
-        self.humidity = np.clip(self.humidity, 0, 10)
+        # Dewpoint (d2m) - Training range: 0-297 K
+        # For EXTREME dry conditions: dewpoint MUCH lower than temperature (large depression)
+        self.dewpoint = self.temperature - 40 + np.random.randn(gs, gs) * 3
+        self.dewpoint = np.clip(self.dewpoint, 250, 270)
 
-        # 14. Wind Speed - ABSOLUTE MAXIMUM (hurricane-force winds)
-        # Maximum wind speed for explosive fire spread
-        self.wind_speed = 25.0 + np.random.randn(gs, gs) * 5
-        self.wind_speed = np.clip(self.wind_speed, 20, 35)
+        # Relative Humidity (rh) - Training range: 0-0.62 (FRACTION not %)
+        # EXTREME fire danger: VERY low humidity (0.05-0.15 = 5-15%)
+        self.humidity = 0.08 + terrain_base * 0.05 + np.random.randn(gs, gs) * 0.02
+        self.humidity = np.clip(self.humidity, 0.05, 0.15)
 
-        # 15. Wind Direction (degrees) - consistent direction with some variance
-        # Set to 45° (northeast) with moderate variance
-        self.wind_direction = np.ones((gs, gs)) * 45 + np.random.randn(gs, gs) * 15
+        # Wind Speed - Training range: 0-5.18 m/s
+        # MAXIMUM fire spread: HIGH wind (4-5.18 m/s = 15-18 km/h)
+        self.wind_speed = 4.5 + np.random.randn(gs, gs) * 0.4
+        self.wind_speed = np.clip(self.wind_speed, 4.0, 5.18)
+
+        # Wind Direction - Training range: 0-352 degrees
+        # Consistent direction for organized fire spread
+        self.wind_direction = np.ones((gs, gs)) * 45 + np.random.randn(gs, gs) * 30
         self.wind_direction = self.wind_direction % 360
 
-        # 16. Precipitation - ABSOLUTE ZERO (complete drought)
-        # No rain whatsoever - bone dry
-        self.precipitation = 0 + np.random.rand(gs, gs) * 1
-        self.precipitation = np.clip(self.precipitation, 0, 2)
+        # Precipitation (tp) - Training range: 0-0.0038 meters (almost zero)
+        # For fire conditions: essentially no rain
+        self.precipitation = 0.0 + np.random.rand(gs, gs) * 0.001
+        self.precipitation = np.clip(self.precipitation, 0.0, 0.002)
 
-        # 17. Pressure - Training data shows ALL ZEROS (probably masked or corrupted)
-        self.pressure = np.zeros((gs, gs))
+        # Surface Pressure (sp) - Training range: 0-101212 Pascals
+        # Use realistic atmospheric pressure (decreases with elevation)
+        self.pressure = 101325 - self.dem * 12 + np.random.randn(gs, gs) * 500
+        self.pressure = np.clip(self.pressure, 85000, 101212)
 
-        # 18. Solar Radiation - ABSOLUTE MAXIMUM (intense sun)
-        # Maximum solar intensity for extreme heat
-        self.solar_radiation = 95_000 + np.random.randn(gs, gs) * 4_000
-        self.solar_radiation = np.clip(self.solar_radiation, 90_000, 101_000)
+        # Solar Radiation (ssrd) - Training range: 0-15,869,024 J/m²
+        # MAXIMUM solar: peak radiation (14-15.8 MJ/m²) - INTENSE sun!
+        self.solar_radiation = 14_500_000 + np.random.randn(gs, gs) * 500_000
+        self.solar_radiation = np.clip(self.solar_radiation, 14_000_000, 15_869_024)
 
-        # 19. NDVI - ABSOLUTE MAXIMUM (densest vegetation possible)
-        # Maximum vegetation density for maximum fuel
-        self.ndvi = (self.lc_forest * 1.0 + self.lc_shrubland * 1.0 +
-                    self.lc_grassland * 1.0 + self.lc_agriculture * 1.0 +
-                    np.random.randn(gs, gs) * 0.01)
-        # Scale to MAXIMUM training data values
-        self.ndvi = self.ndvi * 20_000_000
-        self.ndvi = np.clip(self.ndvi, 14_000_000, 15_104_254)
+        # ========================================================================
+        # VEGETATION FEATURES - MAXIMUM FUEL LOAD (within training ranges)
+        # ========================================================================
 
-        # 20. LAI - ABSOLUTE MAXIMUM (densest leaf coverage)
-        # Maximum leaf area for maximum fuel
-        self.lai = 0.88 + np.random.randn(gs, gs) * 0.015
-        self.lai = np.clip(self.lai, 0.85, 0.90)
+        # NDVI - Training range: -0.18 to 0.90 (NORMAL vegetation index!)
+        # MAXIMUM fire fuel: DENSE vegetation (0.75-0.90) - lots of fuel!
+        self.ndvi = (self.lc_forest * 0.90 + self.lc_shrubland * 0.85 +
+                    self.lc_grassland * 0.80 + self.lc_agriculture * 0.85 +
+                    np.random.randn(gs, gs) * 0.02)
+        self.ndvi = np.clip(self.ndvi, 0.75, 0.90)
 
-        # 21. Soil Moisture - ABSOLUTE ZERO (completely dry soil)
-        # Zero soil moisture for extreme fire conditions
-        self.soil_moisture = 0.0 + np.random.randn(gs, gs) * 0.02
-        self.soil_moisture = np.clip(self.soil_moisture, 0.0, 0.05)
+        # LAI (Leaf Area Index) - Training range: 0-6.8
+        # MAXIMUM fire fuel: MAXIMUM LAI (5.5-6.8) - dense leaf coverage!
+        self.lai = self.ndvi * 7 + 0.5 + np.random.randn(gs, gs) * 0.3
+        self.lai = np.clip(self.lai, 5.5, 6.8)
 
-        # 22. LST Day - ABSOLUTE MAXIMUM (extreme surface heat)
-        # Maximum daytime surface temperature
-        self.lst_day = 0.75 + np.random.randn(gs, gs) * 0.03
-        self.lst_day = np.clip(self.lst_day, 0.72, 0.79)
+        # Soil Moisture Index (smi) - Training range: 0-0.79 (fraction)
+        # EXTREME fire: VERY dry soil (0.05-0.15) - bone dry!
+        self.soil_moisture = 0.08 + (1 - terrain_base) * 0.05 + np.random.randn(gs, gs) * 0.02
+        self.soil_moisture = np.clip(self.soil_moisture, 0.05, 0.15)
 
-        # 23. LST Night - ABSOLUTE MAXIMUM (hot nights)
-        # Maximum nighttime temperature for continuous fire
-        self.lst_night = 310 + np.random.randn(gs, gs) * 8
-        self.lst_night = np.clip(self.lst_night, 300, 320)
+        # LST Day (Land Surface Temperature Day) - Training range: 0-320 K
+        # MAXIMUM fire: HOT surface temps (310-320K = 37-47°C)
+        self.lst_day = self.temperature + 15 + np.random.randn(gs, gs) * 3
+        self.lst_day = np.clip(self.lst_day, 310, 320)
 
-        # 24. Wind U - ABSOLUTE MAXIMUM (extreme easterly winds)
-        # Maximum wind component for rapid fire spread
-        self.wind_u = 280 + np.random.randn(gs, gs) * 15
-        self.wind_u = np.clip(self.wind_u, 270, 300)
+        # LST Night - Training range: 0-302 K
+        # Even nights stay HOT (295-302K) - continuous fire conditions
+        self.lst_night = self.temperature + 0 + np.random.randn(gs, gs) * 3
+        self.lst_night = np.clip(self.lst_night, 295, 302)
 
-        # 25. Wind V - MAXIMUM positive (strong southerly component)
-        # Strong winds in both directions
-        self.wind_v = 1.1 + np.random.randn(gs, gs) * 0.1
-        self.wind_v = np.clip(self.wind_v, 1.0, 1.25)
+        # ========================================================================
+        # WIND COMPONENTS - Training range: u=[-1.62, 3.97], v=[-3.85, 3.67]
+        # ========================================================================
 
-        # 26. TRI - Match training data range: -3.35 to 1.44 (mostly negative)
-        # Use mostly negative values to match training pattern
-        self.tri = -2.0 + np.random.randn(gs, gs) * 0.8
-        self.tri = np.clip(self.tri, -3.2, 1.2)
+        # Compute wind components from speed and direction
+        wind_dir_rad = np.radians(self.wind_direction)
+        self.wind_u = -self.wind_speed * np.sin(wind_dir_rad)
+        self.wind_v = -self.wind_speed * np.cos(wind_dir_rad)
+        self.wind_u = np.clip(self.wind_u, -1.6, 3.9)
+        self.wind_v = np.clip(self.wind_v, -3.8, 3.6)
 
-        # 27. VPD (Vapor Pressure Deficit) - Training data shows ALL ZEROS!
-        # This is critical - the model was trained with VPD = 0 everywhere
+        # ========================================================================
+        # DERIVED FEATURES
+        # ========================================================================
+
+        # TRI (Terrain Ruggedness Index) - Training range: 0-482 (weird but that's what it is!)
+        # This is from the feature engineering - compute from DEM
+        # NOTE: The training data TRI values are MUCH larger than expected
+        dem_torch = torch.from_numpy(self.dem).float()
+        tri_torch = self._compute_tri_like_training(dem_torch)
+        self.tri = tri_torch.numpy()
+        self.tri = np.clip(self.tri, 0, 482)
+
+        # VPD (Vapor Pressure Deficit) - Training range: 0-1 (but has NaN issues)
+        # For now, use zeros to match training (it seems VPD wasn't computed correctly)
         self.vpd = np.zeros((gs, gs))
 
         # 28. Fire History - initialized as zeros (10 timesteps)
@@ -195,38 +240,50 @@ class Environment:
         """
         Get all features as a tensor (except fire history and ignition points).
 
+        Returns 28 channels in the EXACT order expected by the training pipeline:
+        - Channels 0-11: STATIC features (dem, slope, aspect, curvature, roads, population, 5× land cover, tri)
+        - Channels 12-27: DYNAMIC features (t2m, d2m, rh, wind_speed, wind_direction, tp, sp, ssrd, ndvi, lai, smi, lst_day, lst_night, u, v, vpd)
+
+        Note: fire_history and ignition_points are channels 28-29 but managed by simulation_engine.py
+
         Returns:
             torch.Tensor: [28, H, W] tensor of features
         """
+        # MUST match the exact order from WildfireDatasetWithFeatures._dict_to_tensor
+        # Static features first (0-11), then dynamic (12-27)
         features = np.stack([
-            self.dem,
-            self.slope,
-            self.aspect,
-            self.curvature,
-            self.roads_distance,
-            self.population,
-            self.lc_forest,
-            self.lc_shrubland,
-            self.lc_grassland,
-            self.lc_agriculture,
-            self.lc_settlement,
-            self.temperature,
-            self.dewpoint,
-            self.humidity,
-            self.wind_speed,
-            self.wind_direction,
-            self.precipitation,
-            self.pressure,
-            self.solar_radiation,
-            self.ndvi,
-            self.lai,
-            self.soil_moisture,
-            self.lst_day,
-            self.lst_night,
-            self.wind_u,
-            self.wind_v,
-            self.tri,
-            self.vpd,
+            # STATIC (channels 0-11)
+            self.dem,                    # 0
+            self.slope,                  # 1
+            self.aspect,                 # 2
+            self.curvature,              # 3
+            self.roads_distance,         # 4
+            self.population,             # 5
+            self.lc_forest,              # 6
+            self.lc_shrubland,           # 7
+            self.lc_grassland,           # 8
+            self.lc_agriculture,         # 9
+            self.lc_settlement,          # 10
+            self.tri,                    # 11 (moved here - it's STATIC in training!)
+
+            # DYNAMIC (channels 12-27)
+            self.temperature,            # 12 (t2m)
+            self.dewpoint,               # 13 (d2m)
+            self.humidity,               # 14 (rh)
+            self.wind_speed,             # 15
+            self.wind_direction,         # 16
+            self.precipitation,          # 17 (tp)
+            self.pressure,               # 18 (sp)
+            self.solar_radiation,        # 19 (ssrd)
+            self.ndvi,                   # 20
+            self.lai,                    # 21
+            self.soil_moisture,          # 22 (smi)
+            self.lst_day,                # 23
+            self.lst_night,              # 24
+            self.wind_u,                 # 25 (u)
+            self.wind_v,                 # 26 (v)
+            self.vpd,                    # 27
+            # Channels 28-29 (fire_history, ignition_points) are added by simulation_engine
         ], axis=0)
 
         return torch.from_numpy(features).float()
