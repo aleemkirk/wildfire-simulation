@@ -42,12 +42,15 @@ class Environment:
 
         Settings create difficult conditions for fire spread:
         - VPD (Vapor Pressure Deficit): 0.3-1.2 kPa (LOW - very difficult to spread)
-        - Temperature: 18-24°C (cool day)
-        - Humidity: 65-85% (high moisture)
+        - Temperature: 291-299K (18-26°C cool day) IN KELVIN
+        - Humidity: 0.55-0.95 (55-95% moisture) IN FRACTION (0-1)
         - Wind Speed: 1-3 m/s (very light winds)
-        - Precipitation: 3-8 mm (recent rain)
-        - Soil Moisture: 30-45% (moist soil)
+        - Precipitation: 0.003-0.008 m (3-8mm) IN METERS
+        - Pressure: 85-105 kPa IN PASCALS
+        - Solar Radiation: 8-18 MJ/m² IN JOULES/m²
+        - Soil Moisture: 0.25-0.60 (25-60%) IN FRACTION (0-1)
 
+        ALL UNITS MATCH TRAINING DATA FORMAT!
         Fire should spread VERY slowly, 1 cell at a time if at all.
         """
         gs = self.grid_size
@@ -97,18 +100,19 @@ class Environment:
         self.lc_agriculture = ((lc_pattern > 0.15) & (lc_pattern <= 0.3)).astype(float)
         self.lc_settlement = ((lc_pattern <= 0.15)).astype(float)
 
-        # 11. Temperature (°C) - COOL for very slow spread
-        # Set to 18-24°C (cool day)
-        self.temperature = 21 - self.dem / 400 + np.random.randn(gs, gs) * 1.5
-        self.temperature = np.clip(self.temperature, 18, 26)
+        # 11. Temperature (K) - COOL for very slow spread
+        # Set to 291-297K (18-24°C cool day)
+        self.temperature = 294 - self.dem / 400 + np.random.randn(gs, gs) * 1.5
+        self.temperature = np.clip(self.temperature, 291, 299)
 
-        # 12. Dewpoint (°C) - Very high dewpoint (humid)
+        # 12. Dewpoint (K) - Very high dewpoint (humid)
         self.dewpoint = self.temperature - 4 + np.random.randn(gs, gs) * 1.5
 
-        # 13. Humidity (%) - HIGH for minimal spread
-        # Set to 65-85% (high moisture)
-        self.humidity = 75 + terrain_base * 10 + np.random.randn(gs, gs) * 4
-        self.humidity = np.clip(self.humidity, 60, 90)
+        # 13. Humidity - HIGH for minimal spread
+        # Training data uses FRACTION (0-1), not percentage!
+        # Set to 0.60-0.90 (60-90% high moisture)
+        self.humidity = 0.75 + terrain_base * 0.10 + np.random.randn(gs, gs) * 0.04
+        self.humidity = np.clip(self.humidity, 0.55, 0.95)
 
         # 14. Wind Speed (m/s) - VERY LOW for minimal spread
         # Set to 1-3 m/s (very light winds, almost calm)
@@ -120,15 +124,23 @@ class Environment:
         self.wind_direction = np.ones((gs, gs)) * 45 + np.random.randn(gs, gs) * 15
         self.wind_direction = self.wind_direction % 360
 
-        # 16. Precipitation (mm) - Moderate precipitation (recent rain)
-        self.precipitation = 3 + np.random.rand(gs, gs) * 5  # 3-8mm (wet conditions)
+        # 16. Precipitation - Moderate precipitation (recent rain)
+        # Training data uses METERS, not mm!
+        # 3-8mm = 0.003-0.008 meters
+        self.precipitation = 0.003 + np.random.rand(gs, gs) * 0.005  # 3-8mm (wet conditions)
 
-        # 17. Pressure (hPa)
-        self.pressure = 1013 - self.dem / 10 + np.random.randn(gs, gs) * 2
+        # 17. Pressure - Training data uses PASCALS, not hPa!
+        # 1013 hPa = 101300 Pa
+        # Decrease ~10 Pa per meter elevation
+        self.pressure = 101300 - self.dem * 10 + np.random.randn(gs, gs) * 200
+        self.pressure = np.clip(self.pressure, 85000, 105000)
 
-        # 18. Solar Radiation (W/m²) - Low (cloudy day)
-        self.solar_radiation = 450 + np.random.randn(gs, gs) * 80
-        self.solar_radiation = np.clip(self.solar_radiation, 300, 650)
+        # 18. Solar Radiation - Training data uses J/m², not W/m²!
+        # W/m² * 3600 = J/m² (per hour)
+        # 300-650 W/m² = 1,080,000 - 2,340,000 J/m²
+        # From dataset: typical range is ~14-17 million J/m²
+        self.solar_radiation = 12_000_000 + np.random.randn(gs, gs) * 2_000_000
+        self.solar_radiation = np.clip(self.solar_radiation, 8_000_000, 18_000_000)
 
         # 19. NDVI (Normalized Difference Vegetation Index) - vegetation density
         self.ndvi = (self.lc_forest * 0.8 + self.lc_shrubland * 0.5 +
@@ -140,14 +152,15 @@ class Environment:
         self.lai = self.ndvi * 6 + np.random.randn(gs, gs) * 0.5
         self.lai = np.clip(self.lai, 0, 8)
 
-        # 21. Soil Moisture (m³/m³) - HIGH moisture (wet soil)
-        self.soil_moisture = 0.35 + (1 - terrain_base) * 0.10 + np.random.randn(gs, gs) * 0.03
-        self.soil_moisture = np.clip(self.soil_moisture, 0.28, 0.50)
+        # 21. Soil Moisture Index - DIMENSIONLESS (0-1 range)
+        # HIGH moisture for slow spread
+        self.soil_moisture = 0.35 + (1 - terrain_base) * 0.15 + np.random.randn(gs, gs) * 0.05
+        self.soil_moisture = np.clip(self.soil_moisture, 0.25, 0.60)
 
-        # 22. LST Day (Land Surface Temperature - day)
+        # 22. LST Day (Land Surface Temperature - day) in Kelvin
         self.lst_day = self.temperature + 5 + np.random.randn(gs, gs) * 2
 
-        # 23. LST Night (Land Surface Temperature - night)
+        # 23. LST Night (Land Surface Temperature - night) in Kelvin
         self.lst_night = self.temperature - 10 + np.random.randn(gs, gs) * 2
 
         # 24. Wind U (east-west component)
@@ -162,10 +175,13 @@ class Environment:
 
         # 27. VPD (Vapor Pressure Deficit) - MOST IMPORTANT FOR FIRE SPREAD!
         # VPD = sat_vp - actual_vp (VERY LOW for minimal spread)
-        sat_vp = 0.6108 * np.exp(17.27 * self.temperature / (self.temperature + 237.3))
-        actual_vp = sat_vp * (self.humidity / 100)
+        # Convert Kelvin to Celsius for VPD calculation
+        temp_celsius = self.temperature - 273.15
+        sat_vp = 0.6108 * np.exp(17.27 * temp_celsius / (temp_celsius + 237.3))
+        # Humidity is already 0-1 fraction, no need to divide by 100!
+        actual_vp = sat_vp * self.humidity
         self.vpd = sat_vp - actual_vp
-        # With temp ~21°C and humidity ~75%, VPD should be ~0.5-1.0 kPa
+        # With temp ~294K (21°C) and humidity ~0.75 (75%), VPD should be ~0.5-1.0 kPa
         # This is VERY LOW fire danger - fire should barely spread at all
         self.vpd = np.clip(self.vpd, 0.2, 1.5)  # Very low VPD - fire struggles to spread
 
