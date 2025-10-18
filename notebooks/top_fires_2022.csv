@@ -1,0 +1,11 @@
+file_path,file_name,country,date,burned_area_ha,total_burned_pixels,max_burned_day,relative_path
+../data/raw/dataset_64_64_all_10days_final/2022/Spain/corrected_sample_10238.nc,corrected_sample_10238.nc,Spain,2022-07-16,56961.0,491,456,2022/Spain/corrected_sample_10238.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Spain/corrected_sample_10292.nc,corrected_sample_10292.nc,Spain,2022-06-15,48967.0,405,392,2022/Spain/corrected_sample_10292.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Portugal/corrected_sample_10631.nc,corrected_sample_10631.nc,Portugal,2022-08-05,45594.0,365,365,2022/Portugal/corrected_sample_10631.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Spain/corrected_sample_10530.nc,corrected_sample_10530.nc,Spain,2022-07-14,38099.0,531,305,2022/Spain/corrected_sample_10530.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Romania/corrected_sample_10794.nc,corrected_sample_10794.nc,Romania,2022-03-21,31729.0,582,254,2022/Romania/corrected_sample_10794.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Romania/corrected_sample_9910.nc,corrected_sample_9910.nc,Romania,2022-03-21,30854.0,601,247,2022/Romania/corrected_sample_9910.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Spain/corrected_sample_10274.nc,corrected_sample_10274.nc,Spain,2022-07-13,29730.0,323,238,2022/Spain/corrected_sample_10274.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Spain/corrected_sample_10406.nc,corrected_sample_10406.nc,Spain,2022-07-14,28980.0,316,232,2022/Spain/corrected_sample_10406.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Spain/corrected_sample_9864.nc,corrected_sample_9864.nc,Spain,2022-07-14,28106.0,255,225,2022/Spain/corrected_sample_9864.nc
+../data/raw/dataset_64_64_all_10days_final/2022/Algeria/corrected_sample_10723.nc,corrected_sample_10723.nc,Algeria,2022-08-16,28106.0,283,225,2022/Algeria/corrected_sample_10723.nc
