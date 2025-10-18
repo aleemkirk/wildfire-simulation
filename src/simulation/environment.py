@@ -133,9 +133,8 @@ class Environment:
         # ========================================================================
 
         # Temperature (t2m) - Training range: 0-307 K
-        # MAXIMUM fire danger: use UPPER limit (305-307K = 32-34°C) - HOT!
-        self.temperature = 300 + terrain_base * 5 + np.random.randn(gs, gs) * 2
-        self.temperature = np.clip(self.temperature, 298, 307)
+        # ABSOLUTE MAXIMUM: 307K (34°C) everywhere - HOTTEST POSSIBLE!
+        self.temperature = np.ones((gs, gs)) * 307.0
 
         # Dewpoint (d2m) - Training range: 0-297 K
         # For EXTREME dry conditions: dewpoint MUCH lower than temperature (large depression)
@@ -143,14 +142,12 @@ class Environment:
         self.dewpoint = np.clip(self.dewpoint, 250, 270)
 
         # Relative Humidity (rh) - Training range: 0-0.62 (FRACTION not %)
-        # EXTREME fire danger: VERY low humidity (0.05-0.15 = 5-15%)
-        self.humidity = 0.08 + terrain_base * 0.05 + np.random.randn(gs, gs) * 0.02
-        self.humidity = np.clip(self.humidity, 0.05, 0.15)
+        # ABSOLUTE MINIMUM: Close to 0% humidity - DRIEST POSSIBLE!
+        self.humidity = np.ones((gs, gs)) * 0.01  # 1% humidity
 
         # Wind Speed - Training range: 0-5.18 m/s
-        # MAXIMUM fire spread: HIGH wind (4-5.18 m/s = 15-18 km/h)
-        self.wind_speed = 4.5 + np.random.randn(gs, gs) * 0.4
-        self.wind_speed = np.clip(self.wind_speed, 4.0, 5.18)
+        # ABSOLUTE MAXIMUM: 5.18 m/s everywhere - STRONGEST POSSIBLE WIND!
+        self.wind_speed = np.ones((gs, gs)) * 5.18
 
         # Wind Direction - Training range: 0-352 degrees
         # Consistent direction for organized fire spread
@@ -189,14 +186,12 @@ class Environment:
         self.lai = np.clip(self.lai, 5.5, 6.8)
 
         # Soil Moisture Index (smi) - Training range: 0-0.79 (fraction)
-        # EXTREME fire: VERY dry soil (0.05-0.15) - bone dry!
-        self.soil_moisture = 0.08 + (1 - terrain_base) * 0.05 + np.random.randn(gs, gs) * 0.02
-        self.soil_moisture = np.clip(self.soil_moisture, 0.05, 0.15)
+        # ABSOLUTE MINIMUM: 0% soil moisture - COMPLETELY DRY!
+        self.soil_moisture = np.ones((gs, gs)) * 0.001  # Nearly 0
 
         # LST Day (Land Surface Temperature Day) - Training range: 0-320 K
-        # MAXIMUM fire: HOT surface temps (310-320K = 37-47°C)
-        self.lst_day = self.temperature + 15 + np.random.randn(gs, gs) * 3
-        self.lst_day = np.clip(self.lst_day, 310, 320)
+        # ABSOLUTE MAXIMUM: 320K (47°C) - HOTTEST SURFACE POSSIBLE!
+        self.lst_day = np.ones((gs, gs)) * 320.0
 
         # LST Night - Training range: 0-302 K
         # Even nights stay HOT (295-302K) - continuous fire conditions
@@ -288,7 +283,7 @@ class Environment:
 
         return torch.from_numpy(features).float()
 
-    def evolve_dynamic_features(self, timestep):
+    def evolve_dynamic_features(self, timestep, fire_mask=None):
         """
         Evolve dynamic environmental features over time.
 
@@ -297,6 +292,7 @@ class Environment:
 
         Args:
             timestep: Current simulation timestep
+            fire_mask: Optional [H, W] boolean array indicating currently burning cells
         """
         gs = self.grid_size
 
@@ -367,21 +363,35 @@ class Environment:
         # ========================================================================
 
         # NDVI (decreases slightly over time due to drying/burning)
-        # Very slow degradation
+        # Very slow natural degradation
         ndvi_change = -0.001 + np.random.randn(gs, gs) * 0.002
-        self.ndvi += ndvi_change
-        self.ndvi = np.clip(self.ndvi, 0.70, 0.90)
+
+        # FUEL CONSUMPTION: Completely burn all vegetation in fire areas IMMEDIATELY
+        if fire_mask is not None:
+            # Set NDVI to 0 in all burning cells (complete fuel consumption)
+            self.ndvi[fire_mask] = 0.0
+        else:
+            # Only apply natural degradation if no fire
+            self.ndvi += ndvi_change
+            self.ndvi = np.clip(self.ndvi, 0.0, 0.90)
 
         # LAI (follows NDVI)
         self.lai = self.ndvi * 7 + 0.5
-        self.lai = np.clip(self.lai, 5.0, 6.8)
+        self.lai = np.clip(self.lai, 0.0, 6.8)  # Can go to 0 (no leaves left)
 
         # Soil Moisture (decreases with high temperature, increases with rain)
         moisture_change = -0.002 * (self.temperature - 295) / 10  # Evaporation
         moisture_change += self.precipitation * 50  # Rain adds moisture
         moisture_change += np.random.randn(gs, gs) * 0.005
-        self.soil_moisture += moisture_change
-        self.soil_moisture = np.clip(self.soil_moisture, 0.03, 0.20)
+
+        # Fire dries out soil completely
+        if fire_mask is not None:
+            # Set soil moisture to 0 in burning areas (complete drying)
+            self.soil_moisture[fire_mask] = 0.0
+        else:
+            # Apply normal moisture dynamics if no fire
+            self.soil_moisture += moisture_change
+            self.soil_moisture = np.clip(self.soil_moisture, 0.0, 0.20)
 
         # LST Day (tracks air temperature + solar radiation)
         self.lst_day = self.temperature + 12 + solar_cycle * 5 + np.random.randn(gs, gs) * 2

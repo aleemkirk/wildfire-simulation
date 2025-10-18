@@ -122,16 +122,19 @@ class WildfireSimulation:
         Returns:
             np.ndarray: Fire probability map [H, W]
         """
-        # 0. Evolve dynamic environmental features over time
-        self.environment.evolve_dynamic_features(self.timestep)
+        # 0. Get current fire mask (burning cells from previous timestep)
+        current_fire_mask = (self.fire_history[-1] > 0).numpy()  # [H, W] boolean
 
-        # 1. Get environment features (28 channels)
+        # 1. Evolve dynamic environmental features over time (includes fuel consumption)
+        self.environment.evolve_dynamic_features(self.timestep, fire_mask=current_fire_mask)
+
+        # 2. Get environment features (28 channels)
         env_features = self.environment.get_feature_tensor()  # [28, H, W]
 
-        # 2. Compute fire history cumulative sum (as done in training)
+        # 3. Compute fire history cumulative sum (as done in training)
         fire_history_cumsum = self.fire_history.cumsum(dim=0)  # [10, H, W]
 
-        # 3. Stack all features (30 channels × 10 timesteps)
+        # 4. Stack all features (30 channels × 10 timesteps)
         # Repeat static features across all timesteps
         features_all_timesteps = []
         for t in range(10):
@@ -147,35 +150,35 @@ class WildfireSimulation:
         # Stack to get [T, C, H, W]
         features = torch.stack(features_all_timesteps, dim=0)  # [10, 30, H, W]
 
-        # 4. Normalize features
+        # 5. Normalize features
         features = self._normalize_features(features)
 
-        # 5. Prepare model input [B, C, T, H, W]
+        # 6. Prepare model input [B, C, T, H, W]
         model_input = features.permute(1, 0, 2, 3).unsqueeze(0)  # [1, 30, 10, H, W]
         model_input = model_input.to(self.device)
 
-        # 6. Run inference
+        # 7. Run inference
         with torch.no_grad():
             prediction = self.model(model_input)  # [1, 1, 10, H, W]
 
-        # 7. Get next timestep prediction (use LAST timestep - 10-step ahead)
+        # 8. Get next timestep prediction (use LAST timestep - 10-step ahead)
         next_fire_logits = prediction[0, 0, -1]  # [H, W]
         next_fire_prob = torch.sigmoid(next_fire_logits).cpu()  # [H, W]
-        # Threshold at 0.5% to capture low-probability spread
+        # Threshold at 1% - balanced to allow spread while preventing indefinite burning
         # The last prediction (index -1) represents accumulated spread over 10 timesteps,
         # which creates a better continuous simulation effect
-        next_fire_binary = (next_fire_prob > 0.005).float()
+        next_fire_binary = (next_fire_prob > 0.01).float()
 
-        # 8. Update fire history buffer (rolling window)
+        # 9. Update fire history buffer (rolling window)
         self.fire_history = torch.cat([
             self.fire_history[1:],  # Remove oldest timestep
             next_fire_binary.unsqueeze(0)  # Add new prediction
         ], dim=0)
 
-        # 9. Clear ignition points (they only apply for one timestep)
+        # 10. Clear ignition points (they only apply for one timestep)
         self.ignition_points = torch.zeros(self.grid_size, self.grid_size)
 
-        # 10. Update statistics
+        # 11. Update statistics
         self.current_fire_prob = next_fire_prob.numpy()
         self.burned_area = next_fire_binary.sum().item()
         self.timestep += 1
