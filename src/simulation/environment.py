@@ -191,14 +191,57 @@ class Environment:
         # ABSOLUTE MINIMUM: Close to 0% humidity - DRIEST POSSIBLE!
         self.humidity = np.ones((gs, gs)) * 0.01  # 1% humidity
 
-        # Wind Speed - Training range: 0-5.18 m/s
-        # ABSOLUTE MAXIMUM: 5.18 m/s everywhere - STRONGEST POSSIBLE WIND!
-        self.wind_speed = np.ones((gs, gs)) * 5.18
+        # Wind Speed and Direction - Create swirling wind patterns (vortices)
+        # Generate 2-4 wind vortices (like atmospheric eddies or pressure systems)
+        num_vortices = np.random.randint(2, 5)
 
-        # Wind Direction - Training range: 0-352 degrees
-        # Consistent direction for organized fire spread
-        self.wind_direction = np.ones((gs, gs)) * 45 + np.random.randn(gs, gs) * 30
-        self.wind_direction = self.wind_direction % 360
+        # Initialize with base prevailing wind
+        base_wind_speed = np.random.uniform(4.0, 4.5)
+        prevailing_direction = np.random.uniform(0, 360)
+
+        self.wind_speed = np.ones((gs, gs)) * base_wind_speed
+        self.wind_direction = np.ones((gs, gs)) * prevailing_direction
+
+        # Add swirling vortices
+        for i in range(num_vortices):
+            # Random vortex center
+            vortex_x = np.random.uniform(10, gs - 10)
+            vortex_y = np.random.uniform(10, gs - 10)
+
+            # Vortex strength and size
+            vortex_strength = np.random.uniform(0.8, 1.5)  # Wind speed multiplier
+            vortex_radius = np.random.uniform(15, 30)  # Radius of influence
+            clockwise = np.random.choice([1, -1])  # Rotation direction
+
+            # Calculate distance and angle from vortex center for each point
+            for yi in range(gs):
+                for xi in range(gs):
+                    dx = xi - vortex_x
+                    dy = yi - vortex_y
+                    distance = np.sqrt(dx**2 + dy**2)
+
+                    if distance < vortex_radius:
+                        # Vortex influence decreases with distance
+                        influence = np.exp(-(distance / vortex_radius)**2)
+
+                        # Tangential wind direction (perpendicular to radius)
+                        angle_to_center = np.degrees(np.arctan2(dy, dx))
+                        tangential_angle = (angle_to_center + clockwise * 90) % 360
+
+                        # Blend prevailing wind with vortex wind
+                        self.wind_direction[yi, xi] = (
+                            self.wind_direction[yi, xi] * (1 - influence) +
+                            tangential_angle * influence
+                        ) % 360
+
+                        # Wind speed increases near vortex center
+                        speed_boost = vortex_strength * influence * 1.0
+                        self.wind_speed[yi, xi] += speed_boost
+
+        # Add elevation effect
+        elevation_effect = (self.dem / 2000.0) * 0.3
+        self.wind_speed += elevation_effect
+        self.wind_speed = np.clip(self.wind_speed, 3.5, 5.18)
 
         # Precipitation (tp) - Training range: 0-0.0038 meters (almost zero)
         # For fire conditions: essentially no rain
@@ -211,8 +254,16 @@ class Environment:
         self.pressure = np.clip(self.pressure, 85000, 101212)
 
         # Solar Radiation (ssrd) - Training range: 0-15,869,024 J/m²
-        # MAXIMUM solar: peak radiation (14-15.8 MJ/m²) - INTENSE sun!
-        self.solar_radiation = 14_500_000 + np.random.randn(gs, gs) * 500_000
+        # Uniform solar radiation like real sunlight - consistent across area
+        # Only varies by elevation (slightly more at high altitude) and slope aspect
+        base_solar = np.random.uniform(14_000_000, 15_000_000)  # High solar day
+        # Elevation effect: slightly more radiation at higher elevations (thinner atmosphere)
+        elevation_solar = (self.dem / 2000.0) * 500_000  # Up to 0.5 MJ/m² increase
+        # Aspect effect: south-facing slopes get more sun (northern hemisphere)
+        # aspect ranges 0-360, south is ~180 degrees
+        aspect_factor = np.cos(np.radians(self.aspect - 180)) * 0.5 + 0.5  # 0 to 1
+        aspect_solar = aspect_factor * 300_000  # Up to 0.3 MJ/m² variation
+        self.solar_radiation = base_solar + elevation_solar + aspect_solar
         self.solar_radiation = np.clip(self.solar_radiation, 14_000_000, 15_869_024)
 
         # ========================================================================
@@ -376,16 +427,21 @@ class Environment:
         self.humidity += humidity_change
         self.humidity = np.clip(self.humidity, 0.05, 0.20)  # Slightly expanded upper range
 
-        # Wind Speed (turbulent changes)
-        # Random walk with mean reversion to high values
-        wind_change = np.random.randn(gs, gs) * 0.3 + (4.5 - self.wind_speed) * 0.05
-        self.wind_speed += wind_change
+        # Wind Speed (realistic weather pattern evolution)
+        # Slow, uniform changes like real weather fronts - not random turbulence
+        # Gradual strengthening/weakening over time
+        wind_cycle = np.sin(timestep * 2 * np.pi / 40) * 0.5  # ±0.5 m/s over 40 timesteps
+        # Very subtle spatial variation (minimal local gusts)
+        wind_noise = np.random.randn(gs, gs) * 0.05  # Minimal noise
+        self.wind_speed += wind_cycle + wind_noise
         self.wind_speed = np.clip(self.wind_speed, 3.5, 5.18)
 
-        # Wind Direction (slow rotation + turbulence)
-        # Main direction shifts slowly, local turbulence adds variation
-        direction_shift = np.sin(timestep * 2 * np.pi / 30) * 15  # ±15° shift over 30 timesteps
-        direction_noise = np.random.randn(gs, gs) * 10  # Local turbulence
+        # Wind Direction (slow, uniform rotation like weather systems)
+        # Prevailing wind direction shifts gradually and uniformly
+        # Like a weather front passing through
+        direction_shift = np.sin(timestep * 2 * np.pi / 50) * 10  # ±10° shift over 50 timesteps
+        # Minimal local variation (terrain effects only)
+        direction_noise = np.random.randn(gs, gs) * 2  # Very small turbulence
         self.wind_direction += direction_shift + direction_noise
         self.wind_direction = self.wind_direction % 360
 
@@ -409,9 +465,15 @@ class Environment:
         self.pressure = np.clip(self.pressure, 85000, 101212)
 
         # Solar Radiation (diurnal cycle)
-        # High during day, zero at night
+        # Uniform sunlight across the area - only time-based variation
+        # No random spatial noise (sun shines uniformly!)
         solar_cycle = (np.sin(timestep * 2 * np.pi / 20) + 1) / 2  # 0 to 1
-        self.solar_radiation = 14_000_000 * solar_cycle + np.random.randn(gs, gs) * 300_000
+        # Base radiation varies with time of day, plus small elevation/aspect effects
+        base_solar = 14_000_000 * solar_cycle
+        elevation_solar = (self.dem / 2000.0) * 500_000 * solar_cycle
+        aspect_factor = np.cos(np.radians(self.aspect - 180)) * 0.5 + 0.5
+        aspect_solar = aspect_factor * 300_000 * solar_cycle
+        self.solar_radiation = base_solar + elevation_solar + aspect_solar
         self.solar_radiation = np.clip(self.solar_radiation, 0, 15_869_024)
 
         # ========================================================================

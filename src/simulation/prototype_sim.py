@@ -131,6 +131,7 @@ class WildfirePrototype:
             'Temperature',
             'Humidity',
             'Wind Speed',
+            'Wind Direction',
             'Soil Moisture',
             'LAI',
             'Solar Radiation'
@@ -184,6 +185,7 @@ class WildfirePrototype:
             'Temperature': (env.temperature - 273.15, 'RdYlBu_r', 'Temperature (°C)'),
             'Humidity': (env.humidity * 100, 'Blues', 'Humidity (%)'),
             'Wind Speed': (env.wind_speed, 'viridis', 'Wind Speed (m/s)'),
+            'Wind Direction': (env.wind_direction, 'twilight', 'Wind Direction (degrees)'),
             'Soil Moisture': (env.soil_moisture * 100, 'BrBG', 'Soil Moisture (%)'),
             'LAI': (env.lai, 'Greens', 'LAI (Leaf Area Index)'),
             'Solar Radiation': (env.solar_radiation / 1e6, 'hot', 'Solar Radiation (MJ/m²)')
