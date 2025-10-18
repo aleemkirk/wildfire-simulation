@@ -28,13 +28,14 @@ class WildfirePrototype:
     - Side-by-side terrain and fire visualization
     """
 
-    def __init__(self, model_path, stats_path, grid_size=64):
+    def __init__(self, model_path, stats_path, lstm_model_path=None, grid_size=64):
         """
         Initialize prototype simulation.
 
         Args:
-            model_path: Path to trained model
+            model_path: Path to trained UNET model
             stats_path: Path to normalization stats
+            lstm_model_path: Path to trained LSTM model (optional)
             grid_size: Size of grid (default 64)
         """
         print("=" * 80)
@@ -45,6 +46,7 @@ class WildfirePrototype:
         self.simulation = WildfireSimulation(
             model_path=model_path,
             stats_path=stats_path,
+            lstm_model_path=lstm_model_path,
             grid_size=grid_size
         )
 
@@ -62,7 +64,7 @@ class WildfirePrototype:
         print("INSTRUCTIONS")
         print("=" * 80)
         print("  • Use radio buttons on LEFT to select input variable to view")
-        print("  • Click on the CENTER/RIGHT panel to ignite fires")
+        print("  • Click on the FIRE panels to ignite fires")
         print("  • Press SPACEBAR to play/pause simulation")
         print("  • Press 'R' to reset simulation")
         print("  • Close window to exit")
@@ -70,24 +72,42 @@ class WildfirePrototype:
 
     def _setup_visualization(self):
         """Setup matplotlib figure and axes."""
-        # Create figure with two main subplots and space for radio buttons
-        self.fig = plt.figure(figsize=(16, 6), facecolor='black')
-
-        # Create grid for layout: [radio buttons | terrain plot | fire plot]
-        gs = self.fig.add_gridspec(1, 3, width_ratios=[1, 5, 5], wspace=0.3)
-
-        # Radio buttons axis (left)
-        self.ax_radio = self.fig.add_subplot(gs[0], facecolor='black')
-        self.ax_radio.axis('off')
-
-        # Terrain/variable plot (center)
-        self.ax_terrain = self.fig.add_subplot(gs[1], facecolor='black')
-
-        # Fire plot (right)
-        self.ax_fire = self.fig.add_subplot(gs[2], facecolor='black')
-
-        # Get initial state
+        # Get initial state to determine layout
         state = self.simulation.get_current_state()
+        has_lstm = state['has_lstm']
+
+        if has_lstm:
+            # Create figure with 4 panels: radio buttons | terrain | UNET fire | LSTM fire
+            self.fig = plt.figure(figsize=(20, 6), facecolor='black')
+            gs = self.fig.add_gridspec(1, 4, width_ratios=[1, 5, 5, 5], wspace=0.3)
+
+            # Radio buttons axis (left)
+            self.ax_radio = self.fig.add_subplot(gs[0], facecolor='black')
+            self.ax_radio.axis('off')
+
+            # Terrain/variable plot (center-left)
+            self.ax_terrain = self.fig.add_subplot(gs[1], facecolor='black')
+
+            # UNET fire plot (center-right)
+            self.ax_fire = self.fig.add_subplot(gs[2], facecolor='black')
+
+            # LSTM fire plot (right)
+            self.ax_fire_lstm = self.fig.add_subplot(gs[3], facecolor='black')
+        else:
+            # Create figure with 3 panels: radio buttons | terrain | fire
+            self.fig = plt.figure(figsize=(16, 6), facecolor='black')
+            gs = self.fig.add_gridspec(1, 3, width_ratios=[1, 5, 5], wspace=0.3)
+
+            # Radio buttons axis (left)
+            self.ax_radio = self.fig.add_subplot(gs[0], facecolor='black')
+            self.ax_radio.axis('off')
+
+            # Terrain/variable plot (center)
+            self.ax_terrain = self.fig.add_subplot(gs[1], facecolor='black')
+
+            # Fire plot (right)
+            self.ax_fire = self.fig.add_subplot(gs[2], facecolor='black')
+            self.ax_fire_lstm = None
 
         # Left panel: Variable display (initially elevation)
         var_data, var_cmap, var_label = self._get_variable_data('Elevation')
@@ -105,7 +125,7 @@ class WildfirePrototype:
         self.terrain_colorbar.ax.yaxis.label.set_color('white')
         plt.setp(plt.getp(self.terrain_colorbar.ax.axes, 'yticklabels'), color='white')
 
-        # Right panel: Fire spread
+        # UNET fire panel
         # Use vmax=0.2 to make fires more visible (most fires are 0.005-0.15 probability)
         self.fire_img = self.ax_fire.imshow(
             state['fire_prob'],
@@ -114,7 +134,7 @@ class WildfirePrototype:
             vmax=0.2,  # Adjusted from 1.0 to show low probabilities as brighter
             interpolation='nearest'
         )
-        self.ax_fire.set_title('Fire Probability', fontsize=14, fontweight='bold', color='white')
+        self.ax_fire.set_title('Fire Probability (UNET)', fontsize=14, fontweight='bold', color='white')
         self.ax_fire.set_xlabel('X coordinate', color='white')
         self.ax_fire.set_ylabel('Y coordinate', color='white')
         self.ax_fire.tick_params(colors='white')
@@ -122,6 +142,26 @@ class WildfirePrototype:
         fire_colorbar.ax.yaxis.set_tick_params(color='white')
         fire_colorbar.ax.yaxis.label.set_color('white')
         plt.setp(plt.getp(fire_colorbar.ax.axes, 'yticklabels'), color='white')
+
+        # LSTM fire panel (if available)
+        if has_lstm:
+            self.fire_img_lstm = self.ax_fire_lstm.imshow(
+                state['fire_prob_lstm'],
+                cmap='hot',
+                vmin=0,
+                vmax=0.2,
+                interpolation='nearest'
+            )
+            self.ax_fire_lstm.set_title('Fire Probability (LSTM)', fontsize=14, fontweight='bold', color='white')
+            self.ax_fire_lstm.set_xlabel('X coordinate', color='white')
+            self.ax_fire_lstm.set_ylabel('Y coordinate', color='white')
+            self.ax_fire_lstm.tick_params(colors='white')
+            fire_colorbar_lstm = plt.colorbar(self.fire_img_lstm, ax=self.ax_fire_lstm, label='Probability')
+            fire_colorbar_lstm.ax.yaxis.set_tick_params(color='white')
+            fire_colorbar_lstm.ax.yaxis.label.set_color('white')
+            plt.setp(plt.getp(fire_colorbar_lstm.ax.axes, 'yticklabels'), color='white')
+        else:
+            self.fire_img_lstm = None
 
         # Create radio buttons for variable selection
         variable_options = [
@@ -238,8 +278,11 @@ class WildfirePrototype:
         """Handle mouse click to ignite fire."""
         print(f"\n[DEBUG] Click detected: inaxes={event.inaxes}, button={event.button}")
 
-        # Only respond to clicks on the fire panel
-        if event.inaxes == self.ax_fire and event.button == 1:  # Left click
+        # Respond to clicks on either fire panel
+        clicked_fire_panel = (event.inaxes == self.ax_fire or
+                             (self.ax_fire_lstm is not None and event.inaxes == self.ax_fire_lstm))
+
+        if clicked_fire_panel and event.button == 1:  # Left click
             x = int(event.xdata + 0.5)
             y = int(event.ydata + 0.5)
 
@@ -258,8 +301,11 @@ class WildfirePrototype:
                 print(f"[DEBUG] Fire probability stats: min={fire_prob.min():.4f}, max={fire_prob.max():.4f}, mean={fire_prob.mean():.4f}")
                 print(f"[DEBUG] Cells > 0.15: {(fire_prob > 0.15).sum()} / 4096")
 
-                # Update fire visualization
+                # Update fire visualizations
                 self.fire_img.set_data(fire_prob)
+                if self.fire_img_lstm is not None:
+                    state = self.simulation.get_current_state()
+                    self.fire_img_lstm.set_data(state['fire_prob_lstm'])
 
                 # Update statistics
                 state = self.simulation.get_current_state()
@@ -269,14 +315,14 @@ class WildfirePrototype:
             else:
                 print(f"[DEBUG] Simulation is playing, ignition will appear on next frame")
 
-            # Highlight clicked cell briefly
+            # Highlight clicked cell briefly on the clicked panel
             rect = Rectangle(
                 (x - 0.5, y - 0.5), 1, 1,
                 linewidth=2,
                 edgecolor='cyan',
                 facecolor='none'
             )
-            self.ax_fire.add_patch(rect)
+            event.inaxes.add_patch(rect)
 
             # Draw everything
             self.fig.canvas.draw()
@@ -293,7 +339,7 @@ class WildfirePrototype:
             print(f"🔥 Fire ignited at ({x}, {y}) - {status}")
         else:
             if event.inaxes == self.ax_terrain:
-                print("[INFO] ⚠️  You clicked on the TERRAIN panel (left). Click on the FIRE panel (right) instead!")
+                print("[INFO] ⚠️  You clicked on the TERRAIN panel (left). Click on the FIRE panel instead!")
             elif event.inaxes is None:
                 print("[INFO] Click was outside the panels")
             else:
@@ -356,21 +402,30 @@ class WildfirePrototype:
             # Run simulation step
             fire_prob = self.simulation.step()
 
-            # Update fire visualization
+            # Update fire visualizations
             self.fire_img.set_data(fire_prob)
+
+            # Get state for LSTM update
+            state = self.simulation.get_current_state()
+
+            if self.fire_img_lstm is not None:
+                self.fire_img_lstm.set_data(state['fire_prob_lstm'])
 
             # Update left panel (in case displaying dynamic variables)
             var_data, var_cmap, var_label = self._get_variable_data(self.current_variable)
             self.terrain_img.set_data(var_data)
 
             # Update statistics
-            state = self.simulation.get_current_state()
             self.stats_text.set_text(self._format_stats(state))
 
             # Print progress
             print(f"Step {state['timestep']}: {int(state['burned_area'])} cells burned")
 
-        return [self.fire_img, self.terrain_img, self.stats_text]
+        return_list = [self.fire_img, self.terrain_img, self.stats_text]
+        if self.fire_img_lstm is not None:
+            return_list.append(self.fire_img_lstm)
+
+        return return_list
 
     def run(self):
         """Start the interactive visualization."""
@@ -381,21 +436,31 @@ def main():
     """Main entry point."""
     # Configuration
     MODEL_PATH = Path(__file__).parent.parent.parent / 'prod_models' / 'UNET3D' / '3D-UNET-WILDFIRE-1.pt'
+    LSTM_MODEL_PATH = Path(__file__).parent.parent.parent / 'prod_models' / 'LSTM' / 'LSTM.pt'
     STATS_PATH = Path(__file__).parent.parent.parent / 'data' / 'processed' / 'normalization_stats.json'
 
     # Check files exist
     if not MODEL_PATH.exists():
-        print(f"❌ Error: Model not found at {MODEL_PATH}")
+        print(f"❌ Error: UNET model not found at {MODEL_PATH}")
         return
 
     if not STATS_PATH.exists():
         print(f"❌ Error: Normalization stats not found at {STATS_PATH}")
         return
 
+    # Check if LSTM model exists
+    if LSTM_MODEL_PATH.exists():
+        print(f"✓ Found LSTM model at {LSTM_MODEL_PATH}")
+        lstm_path = LSTM_MODEL_PATH
+    else:
+        print(f"⚠️  LSTM model not found at {LSTM_MODEL_PATH}, running with UNET only")
+        lstm_path = None
+
     # Create and run prototype
     prototype = WildfirePrototype(
         model_path=MODEL_PATH,
         stats_path=STATS_PATH,
+        lstm_model_path=lstm_path,
         grid_size=64
     )
 

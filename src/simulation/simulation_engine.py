@@ -14,6 +14,7 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
 from models.unet3d import UNet3D
+from models.lstm import WildfireLSTM
 from simulation.environment import Environment
 
 
@@ -28,13 +29,14 @@ class WildfireSimulation:
     - State updates
     """
 
-    def __init__(self, model_path, stats_path, grid_size=64, device='mps'):
+    def __init__(self, model_path, stats_path, lstm_model_path=None, grid_size=64, device='mps'):
         """
         Initialize simulation engine.
 
         Args:
             model_path: Path to trained 3D U-Net model
             stats_path: Path to normalization statistics JSON
+            lstm_model_path: Path to trained LSTM model (optional)
             grid_size: Size of the grid (default 64)
             device: Device for model inference ('mps', 'cuda', or 'cpu')
         """
@@ -44,8 +46,13 @@ class WildfireSimulation:
 
         print(f"Initializing simulation on device: {self.device}")
 
-        # Load model
+        # Load UNET model
         self._load_model(model_path)
+
+        # Load LSTM model if provided
+        self.lstm_model = None
+        if lstm_model_path is not None:
+            self._load_lstm_model(lstm_model_path)
 
         # Load normalization statistics
         self._load_normalization_stats(stats_path)
@@ -63,13 +70,14 @@ class WildfireSimulation:
         self.timestep = 0
         self.is_running = False
         self.current_fire_prob = np.zeros((grid_size, grid_size))
+        self.current_fire_prob_lstm = np.zeros((grid_size, grid_size))
         self.burned_area = 0.0
 
         print("✓ Simulation initialized successfully")
 
     def _load_model(self, model_path):
         """Load trained 3D U-Net model."""
-        print(f"Loading model from {model_path}...")
+        print(f"Loading UNET model from {model_path}...")
 
         checkpoint = torch.load(model_path, map_location=self.device)
 
@@ -83,7 +91,31 @@ class WildfireSimulation:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model.eval()
 
-        print(f"✓ Model loaded (epoch {checkpoint['epoch']}, IoU: {checkpoint['metrics']['iou']:.4f})")
+        print(f"✓ UNET model loaded (epoch {checkpoint['epoch']}, IoU: {checkpoint['metrics']['iou']:.4f})")
+
+    def _load_lstm_model(self, model_path):
+        """Load trained LSTM model."""
+        print(f"Loading LSTM model from {model_path}...")
+
+        checkpoint = torch.load(model_path, map_location=self.device)
+
+        # Check the input channels from the model state dict
+        encoder_weight_shape = checkpoint['model_state_dict']['encoder.0.weight'].shape
+        input_channels = encoder_weight_shape[1]  # [out_channels, in_channels, H, W]
+
+        self.lstm_model = WildfireLSTM(
+            input_channels=input_channels,
+            hidden_dims=[64, 64, 32],
+            kernel_sizes=[3, 3, 3],
+            output_channels=1
+        ).to(self.device)
+
+        self.lstm_model.load_state_dict(checkpoint['model_state_dict'])
+        self.lstm_model.eval()
+
+        epoch = checkpoint.get('epoch', 'N/A')
+        iou = checkpoint.get('metrics', {}).get('iou', 'N/A')
+        print(f"✓ LSTM model loaded (epoch {epoch}, IoU: {iou})")
 
     def _load_normalization_stats(self, stats_path):
         """Load normalization statistics for feature scaling."""
@@ -120,7 +152,7 @@ class WildfireSimulation:
         Execute one simulation timestep.
 
         Returns:
-            np.ndarray: Fire probability map [H, W]
+            np.ndarray: Fire probability map [H, W] from UNET model
         """
         # 0. Get current fire mask (burning cells from previous timestep)
         current_fire_mask = (self.fire_history[-1] > 0).numpy()  # [H, W] boolean
@@ -134,7 +166,7 @@ class WildfireSimulation:
         # 3. Compute fire history cumulative sum (as done in training)
         fire_history_cumsum = self.fire_history.cumsum(dim=0)  # [10, H, W]
 
-        # 4. Stack all features (30 channels × 10 timesteps)
+        # 4. Stack all features (30 channels × 10 timesteps) for UNET
         # Repeat static features across all timesteps
         features_all_timesteps = []
         for t in range(10):
@@ -148,37 +180,52 @@ class WildfireSimulation:
             features_all_timesteps.append(timestep_features)
 
         # Stack to get [T, C, H, W]
-        features = torch.stack(features_all_timesteps, dim=0)  # [10, 30, H, W]
+        features_unet = torch.stack(features_all_timesteps, dim=0)  # [10, 30, H, W]
 
         # 5. Normalize features
-        features = self._normalize_features(features)
+        features_unet_norm = self._normalize_features(features_unet)
 
-        # 6. Prepare model input [B, C, T, H, W]
-        model_input = features.permute(1, 0, 2, 3).unsqueeze(0)  # [1, 30, 10, H, W]
-        model_input = model_input.to(self.device)
+        # 6. Prepare UNET model input [B, C, T, H, W]
+        model_input_unet = features_unet_norm.permute(1, 0, 2, 3).unsqueeze(0)  # [1, 30, 10, H, W]
+        model_input_unet = model_input_unet.to(self.device)
 
-        # 7. Run inference
+        # 7. Run UNET inference
         with torch.no_grad():
-            prediction = self.model(model_input)  # [1, 1, 10, H, W]
+            prediction_unet = self.model(model_input_unet)  # [1, 1, 10, H, W]
 
-        # 8. Get next timestep prediction (use LAST timestep - 10-step ahead)
-        next_fire_logits = prediction[0, 0, -1]  # [H, W]
+        # 8. Get next timestep prediction from UNET (use LAST timestep - 10-step ahead)
+        next_fire_logits = prediction_unet[0, 0, -1]  # [H, W]
         next_fire_prob = torch.sigmoid(next_fire_logits).cpu()  # [H, W]
-        # Threshold at 1% - balanced to allow spread while preventing indefinite burning
+
+        # 9. Run LSTM inference if model is available
+        if self.lstm_model is not None:
+            # LSTM uses the same 30-channel features as UNET
+            # LSTM expects [B, T, C, H, W]
+            model_input_lstm = features_unet_norm.unsqueeze(0).to(self.device)  # [1, 10, 30, H, W]
+
+            with torch.no_grad():
+                prediction_lstm = self.lstm_model(model_input_lstm)  # [1, 10, 1, H, W]
+
+            # Get next timestep prediction from LSTM
+            next_fire_logits_lstm = prediction_lstm[0, -1, 0]  # [H, W]
+            next_fire_prob_lstm = torch.sigmoid(next_fire_logits_lstm).cpu()  # [H, W]
+            self.current_fire_prob_lstm = next_fire_prob_lstm.numpy()
+
+        # 10. Threshold at 1% - balanced to allow spread while preventing indefinite burning
         # The last prediction (index -1) represents accumulated spread over 10 timesteps,
         # which creates a better continuous simulation effect
         next_fire_binary = (next_fire_prob > 0.01).float()
 
-        # 9. Update fire history buffer (rolling window)
+        # 11. Update fire history buffer (rolling window)
         self.fire_history = torch.cat([
             self.fire_history[1:],  # Remove oldest timestep
             next_fire_binary.unsqueeze(0)  # Add new prediction
         ], dim=0)
 
-        # 10. Clear ignition points (they only apply for one timestep)
+        # 12. Clear ignition points (they only apply for one timestep)
         self.ignition_points = torch.zeros(self.grid_size, self.grid_size)
 
-        # 11. Update statistics
+        # 13. Update statistics
         self.current_fire_prob = next_fire_prob.numpy()
         self.burned_area = next_fire_binary.sum().item()
         self.timestep += 1
@@ -210,6 +257,7 @@ class WildfireSimulation:
         self.ignition_points = torch.zeros(self.grid_size, self.grid_size)
         self.timestep = 0
         self.current_fire_prob = np.zeros((self.grid_size, self.grid_size))
+        self.current_fire_prob_lstm = np.zeros((self.grid_size, self.grid_size))
         self.burned_area = 0.0
         self.is_running = False
 
@@ -221,14 +269,18 @@ class WildfireSimulation:
 
         Returns:
             dict with keys:
-                - fire_prob: [H, W] fire probability
+                - fire_prob: [H, W] fire probability (UNET)
+                - fire_prob_lstm: [H, W] fire probability (LSTM)
                 - terrain: [H, W] terrain elevation
                 - timestep: current timestep
                 - burned_area: number of burned cells
+                - has_lstm: whether LSTM model is available
         """
         return {
             'fire_prob': self.current_fire_prob,
+            'fire_prob_lstm': self.current_fire_prob_lstm,
             'terrain': self.environment.dem,
             'timestep': self.timestep,
             'burned_area': self.burned_area,
+            'has_lstm': self.lstm_model is not None,
         }
