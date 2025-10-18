@@ -144,9 +144,35 @@ The simulation visualizes:
 
 ## Results
 
-The simulation demonstrates both models' ability to predict realistic wildfire spread patterns influenced by terrain, weather, and vegetation conditions. The dual-model visualization allows comparison of the 3D U-Net's parallel processing approach versus the ConvLSTM's sequential temporal modeling.
+### Model Performance
 
-![Simulation Results](results/simulation_2000_steps.gif)
+Both models were trained for 50 epochs on the MesoGEOS wildfire dataset. Performance metrics are evaluated on the validation set at the best epoch (minimum validation loss).
+
+![Confusion Matrices](results/confusion_matrices.png)
+
+#### 3D U-Net (Epoch 50)
+- **Precision**: 0.9616 - High accuracy when predicting fire presence (few false positives)
+- **Recall**: 0.9973 - Excellent at detecting actual fire spread (captures almost all fire cells)
+- **F1 Score**: 0.9791 - Outstanding balance between precision and recall
+- **IoU**: 0.9590 - Very high overlap between predicted and actual burned areas
+
+#### ConvLSTM (Epoch 50)
+- **Precision**: 0.2855 - More false positives (predicts fire in non-burning areas)
+- **Recall**: 0.9327 - Good at detecting actual fire cells
+- **F1 Score**: 0.4369 - Moderate overall performance
+- **IoU**: 0.2799 - Lower spatial overlap with ground truth
+
+### Key Findings
+
+1. **U-Net Superior Performance**: The 3D U-Net significantly outperforms ConvLSTM across all metrics, achieving near-perfect recall (99.73%) and high precision (96.16%).
+
+2. **Precision-Recall Trade-off**: ConvLSTM shows high recall (93.27%) but low precision (28.55%), indicating it tends to overpredict fire spread but successfully captures most actual fire events.
+
+3. **Spatial Accuracy**: U-Net's IoU of 95.90% demonstrates excellent spatial alignment with ground truth, while ConvLSTM's 27.99% IoU suggests difficulty in precise boundary prediction.
+
+4. **Architecture Insights**:
+   - U-Net's skip connections and parallel 3D convolutions effectively capture spatiotemporal patterns
+   - ConvLSTM's sequential processing may require longer training or architecture adjustments to match U-Net performance
 
 ---
 
