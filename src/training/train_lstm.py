@@ -351,7 +351,7 @@ def main():
 
         # Training
         'batch_size': 4,
-        'num_epochs': 10,
+        'num_epochs': 50,
         'learning_rate': 1e-3,
         'weight_decay': 1e-5,
         'num_workers': 4,
