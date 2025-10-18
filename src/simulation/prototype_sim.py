@@ -71,20 +71,20 @@ class WildfirePrototype:
     def _setup_visualization(self):
         """Setup matplotlib figure and axes."""
         # Create figure with two main subplots and space for radio buttons
-        self.fig = plt.figure(figsize=(16, 6))
+        self.fig = plt.figure(figsize=(16, 6), facecolor='black')
 
         # Create grid for layout: [radio buttons | terrain plot | fire plot]
         gs = self.fig.add_gridspec(1, 3, width_ratios=[1, 5, 5], wspace=0.3)
 
         # Radio buttons axis (left)
-        self.ax_radio = self.fig.add_subplot(gs[0])
+        self.ax_radio = self.fig.add_subplot(gs[0], facecolor='black')
         self.ax_radio.axis('off')
 
         # Terrain/variable plot (center)
-        self.ax_terrain = self.fig.add_subplot(gs[1])
+        self.ax_terrain = self.fig.add_subplot(gs[1], facecolor='black')
 
         # Fire plot (right)
-        self.ax_fire = self.fig.add_subplot(gs[2])
+        self.ax_fire = self.fig.add_subplot(gs[2], facecolor='black')
 
         # Get initial state
         state = self.simulation.get_current_state()
@@ -96,10 +96,14 @@ class WildfirePrototype:
             cmap=var_cmap,
             interpolation='nearest'
         )
-        self.ax_terrain.set_title('Terrain Elevation (m)', fontsize=14, fontweight='bold')
-        self.ax_terrain.set_xlabel('X coordinate')
-        self.ax_terrain.set_ylabel('Y coordinate')
+        self.ax_terrain.set_title('Terrain Elevation (m)', fontsize=14, fontweight='bold', color='white')
+        self.ax_terrain.set_xlabel('X coordinate', color='white')
+        self.ax_terrain.set_ylabel('Y coordinate', color='white')
+        self.ax_terrain.tick_params(colors='white')
         self.terrain_colorbar = plt.colorbar(self.terrain_img, ax=self.ax_terrain, label=var_label)
+        self.terrain_colorbar.ax.yaxis.set_tick_params(color='white')
+        self.terrain_colorbar.ax.yaxis.label.set_color('white')
+        plt.setp(plt.getp(self.terrain_colorbar.ax.axes, 'yticklabels'), color='white')
 
         # Right panel: Fire spread
         # Use vmax=0.2 to make fires more visible (most fires are 0.005-0.15 probability)
@@ -110,10 +114,14 @@ class WildfirePrototype:
             vmax=0.2,  # Adjusted from 1.0 to show low probabilities as brighter
             interpolation='nearest'
         )
-        self.ax_fire.set_title('Fire Probability', fontsize=14, fontweight='bold')
-        self.ax_fire.set_xlabel('X coordinate')
-        self.ax_fire.set_ylabel('Y coordinate')
-        plt.colorbar(self.fire_img, ax=self.ax_fire, label='Probability')
+        self.ax_fire.set_title('Fire Probability', fontsize=14, fontweight='bold', color='white')
+        self.ax_fire.set_xlabel('X coordinate', color='white')
+        self.ax_fire.set_ylabel('Y coordinate', color='white')
+        self.ax_fire.tick_params(colors='white')
+        fire_colorbar = plt.colorbar(self.fire_img, ax=self.ax_fire, label='Probability')
+        fire_colorbar.ax.yaxis.set_tick_params(color='white')
+        fire_colorbar.ax.yaxis.label.set_color('white')
+        plt.setp(plt.getp(fire_colorbar.ax.axes, 'yticklabels'), color='white')
 
         # Create radio buttons for variable selection
         variable_options = [
@@ -129,9 +137,17 @@ class WildfirePrototype:
         ]
 
         # Position radio buttons
-        radio_ax = plt.axes([0.02, 0.3, 0.10, 0.5])
+        radio_ax = plt.axes([0.02, 0.3, 0.10, 0.5], facecolor='black')
         self.radio = RadioButtons(radio_ax, variable_options, active=0)
         self.radio.on_clicked(self._on_variable_change)
+
+        # Style radio buttons for black background
+        for label in self.radio.labels:
+            label.set_color('white')
+        # Style radio button circles (if they exist in this matplotlib version)
+        if hasattr(self.radio, 'circles'):
+            for circle in self.radio.circles:
+                circle.set_edgecolor('white')
 
         # Add statistics text
         self.stats_text = self.fig.text(
@@ -139,7 +155,8 @@ class WildfirePrototype:
             self._format_stats(state),
             ha='center',
             fontsize=12,
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+            color='white',
+            bbox=dict(boxstyle='round', facecolor='darkslategray', alpha=0.8, edgecolor='white')
         )
 
         # Connect event handlers
@@ -194,11 +211,15 @@ class WildfirePrototype:
         self.terrain_img.autoscale()
 
         # Update title
-        self.ax_terrain.set_title(f'{label}', fontsize=14, fontweight='bold')
+        self.ax_terrain.set_title(f'{label}', fontsize=14, fontweight='bold', color='white')
 
         # Update colorbar
         self.terrain_colorbar.update_normal(self.terrain_img)
         self.terrain_colorbar.set_label(var_label)
+        # Maintain white styling for colorbar
+        self.terrain_colorbar.ax.yaxis.set_tick_params(color='white')
+        self.terrain_colorbar.ax.yaxis.label.set_color('white')
+        plt.setp(plt.getp(self.terrain_colorbar.ax.axes, 'yticklabels'), color='white')
 
         # Redraw
         self.fig.canvas.draw_idle()
