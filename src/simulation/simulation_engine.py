@@ -51,7 +51,7 @@ class WildfireSimulation:
         self._load_normalization_stats(stats_path)
 
         # Initialize environment
-        self.environment = Environment(grid_size=grid_size)
+        self.environment = Environment(grid_size=grid_size, seed = 1996)
 
         # Initialize fire history buffer (10 timesteps)
         self.fire_history = torch.zeros(10, grid_size, grid_size)

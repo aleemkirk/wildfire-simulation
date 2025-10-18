@@ -7,6 +7,7 @@ Click anywhere on the grid to start a fire and watch the model predictions.
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Rectangle
+from matplotlib.widgets import RadioButtons
 import numpy as np
 from pathlib import Path
 import sys
@@ -51,13 +52,17 @@ class WildfirePrototype:
         self.is_playing = False
         self.animation = None
 
+        # Current variable to display in left panel
+        self.current_variable = 'Elevation'
+
         # Setup visualization
         self._setup_visualization()
 
         print("\n" + "=" * 80)
         print("INSTRUCTIONS")
         print("=" * 80)
-        print("  • Click on the RIGHT panel to ignite fires")
+        print("  • Use radio buttons on LEFT to select input variable to view")
+        print("  • Click on the CENTER/RIGHT panel to ignite fires")
         print("  • Press SPACEBAR to play/pause simulation")
         print("  • Press 'R' to reset simulation")
         print("  • Close window to exit")
@@ -65,24 +70,36 @@ class WildfirePrototype:
 
     def _setup_visualization(self):
         """Setup matplotlib figure and axes."""
-        # Create figure with two subplots
-        self.fig, (self.ax_terrain, self.ax_fire) = plt.subplots(
-            1, 2, figsize=(14, 6)
-        )
+        # Create figure with two main subplots and space for radio buttons
+        self.fig = plt.figure(figsize=(16, 6))
+
+        # Create grid for layout: [radio buttons | terrain plot | fire plot]
+        gs = self.fig.add_gridspec(1, 3, width_ratios=[1, 5, 5], wspace=0.3)
+
+        # Radio buttons axis (left)
+        self.ax_radio = self.fig.add_subplot(gs[0])
+        self.ax_radio.axis('off')
+
+        # Terrain/variable plot (center)
+        self.ax_terrain = self.fig.add_subplot(gs[1])
+
+        # Fire plot (right)
+        self.ax_fire = self.fig.add_subplot(gs[2])
 
         # Get initial state
         state = self.simulation.get_current_state()
 
-        # Left panel: Terrain elevation
+        # Left panel: Variable display (initially elevation)
+        var_data, var_cmap, var_label = self._get_variable_data('Elevation')
         self.terrain_img = self.ax_terrain.imshow(
-            state['terrain'],
-            cmap='terrain',
+            var_data,
+            cmap=var_cmap,
             interpolation='nearest'
         )
         self.ax_terrain.set_title('Terrain Elevation (m)', fontsize=14, fontweight='bold')
         self.ax_terrain.set_xlabel('X coordinate')
         self.ax_terrain.set_ylabel('Y coordinate')
-        plt.colorbar(self.terrain_img, ax=self.ax_terrain, label='Elevation (m)')
+        self.terrain_colorbar = plt.colorbar(self.terrain_img, ax=self.ax_terrain, label=var_label)
 
         # Right panel: Fire spread
         # Use vmax=0.2 to make fires more visible (most fires are 0.005-0.15 probability)
@@ -98,6 +115,24 @@ class WildfirePrototype:
         self.ax_fire.set_ylabel('Y coordinate')
         plt.colorbar(self.fire_img, ax=self.ax_fire, label='Probability')
 
+        # Create radio buttons for variable selection
+        variable_options = [
+            'Elevation',
+            'Slope',
+            'NDVI',
+            'Temperature',
+            'Humidity',
+            'Wind Speed',
+            'Soil Moisture',
+            'LAI',
+            'Solar Radiation'
+        ]
+
+        # Position radio buttons
+        radio_ax = plt.axes([0.02, 0.3, 0.10, 0.5])
+        self.radio = RadioButtons(radio_ax, variable_options, active=0)
+        self.radio.on_clicked(self._on_variable_change)
+
         # Add statistics text
         self.stats_text = self.fig.text(
             0.5, 0.02,
@@ -111,8 +146,64 @@ class WildfirePrototype:
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
         self.fig.canvas.mpl_connect('key_press_event', self._on_key_press)
 
-        plt.tight_layout()
-        plt.subplots_adjust(bottom=0.1)
+        plt.subplots_adjust(bottom=0.1, left=0.15)
+
+    def _get_variable_data(self, variable_name):
+        """
+        Get data, colormap, and label for a given variable.
+
+        Args:
+            variable_name: Name of variable to display
+
+        Returns:
+            tuple: (data, colormap, label)
+        """
+        env = self.simulation.environment
+
+        variable_map = {
+            'Elevation': (env.dem, 'terrain', 'Elevation (m)'),
+            'Slope': (env.slope, 'YlOrRd', 'Slope (degrees)'),
+            'NDVI': (env.ndvi, 'YlGn', 'NDVI'),
+            'Temperature': (env.temperature - 273.15, 'RdYlBu_r', 'Temperature (°C)'),
+            'Humidity': (env.humidity * 100, 'Blues', 'Humidity (%)'),
+            'Wind Speed': (env.wind_speed, 'viridis', 'Wind Speed (m/s)'),
+            'Soil Moisture': (env.soil_moisture * 100, 'BrBG', 'Soil Moisture (%)'),
+            'LAI': (env.lai, 'Greens', 'LAI (Leaf Area Index)'),
+            'Solar Radiation': (env.solar_radiation / 1e6, 'hot', 'Solar Radiation (MJ/m²)')
+        }
+
+        return variable_map.get(variable_name, variable_map['Elevation'])
+
+    def _on_variable_change(self, label):
+        """
+        Handle variable selection change from radio buttons.
+
+        Args:
+            label: Selected variable name
+        """
+        self.current_variable = label
+
+        # Get new variable data
+        var_data, var_cmap, var_label = self._get_variable_data(label)
+
+        # Update image data and colormap
+        self.terrain_img.set_data(var_data)
+        self.terrain_img.set_cmap(var_cmap)
+
+        # Update colorbar limits
+        self.terrain_img.autoscale()
+
+        # Update title
+        self.ax_terrain.set_title(f'{label}', fontsize=14, fontweight='bold')
+
+        # Update colorbar
+        self.terrain_colorbar.update_normal(self.terrain_img)
+        self.terrain_colorbar.set_label(var_label)
+
+        # Redraw
+        self.fig.canvas.draw_idle()
+
+        print(f"📊 Switched to viewing: {label}")
 
     def _format_stats(self, state):
         """Format statistics text."""
@@ -202,7 +293,7 @@ class WildfirePrototype:
                 self.animation = FuncAnimation(
                     self.fig,
                     self._update_frame,
-                    interval=100,  # 500ms = 0.5 seconds per step
+                    interval=100,  # 500ms = 0.1 seconds per step
                     blit=False,
                     cache_frame_data=False
                 )
@@ -245,6 +336,10 @@ class WildfirePrototype:
             # Update fire visualization
             self.fire_img.set_data(fire_prob)
 
+            # Update left panel (in case displaying dynamic variables)
+            var_data, var_cmap, var_label = self._get_variable_data(self.current_variable)
+            self.terrain_img.set_data(var_data)
+
             # Update statistics
             state = self.simulation.get_current_state()
             self.stats_text.set_text(self._format_stats(state))
@@ -252,7 +347,7 @@ class WildfirePrototype:
             # Print progress
             print(f"Step {state['timestep']}: {int(state['burned_area'])} cells burned")
 
-        return [self.fire_img, self.stats_text]
+        return [self.fire_img, self.terrain_img, self.stats_text]
 
     def run(self):
         """Start the interactive visualization."""

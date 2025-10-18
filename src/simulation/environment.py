@@ -21,15 +21,20 @@ class Environment:
     - Fire: Fire history, ignition points (2)
     """
 
-    def __init__(self, grid_size=64, seed=42):
+    def __init__(self, grid_size=64, seed=None):
         """
         Initialize environment with random but realistic values.
 
         Args:
             grid_size: Size of the grid (default 64x64)
-            seed: Random seed for reproducibility
+            seed: Random seed for reproducibility (default None = random each time)
         """
         self.grid_size = grid_size
+
+        # If seed is None, use a random seed each time
+        if seed is None:
+            seed = np.random.randint(0, 1000000)
+
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -82,18 +87,47 @@ class Environment:
         """
         gs = self.grid_size
 
-        # Create a base for correlated features using Perlin-like noise
-        x = np.linspace(0, 4 * np.pi, gs)
-        y = np.linspace(0, 4 * np.pi, gs)
+        # Create a base for correlated features using Perlin-like noise with MORE RANDOMNESS
+        # Randomize frequency and phase for each run
+        freq1 = np.random.uniform(2, 6)  # Random frequency between 2-6
+        freq2 = np.random.uniform(2, 6)
+        phase1 = np.random.uniform(0, 2 * np.pi)
+        phase2 = np.random.uniform(0, 2 * np.pi)
+
+        x = np.linspace(0, freq1 * np.pi, gs)
+        y = np.linspace(0, freq2 * np.pi, gs)
         X, Y = np.meshgrid(x, y)
 
-        # Base terrain pattern
-        terrain_base = (np.sin(X) + np.cos(Y) +
-                       0.5 * np.sin(2*X) + 0.5 * np.cos(2*Y))
+        # Multi-frequency terrain pattern with random phases and amplitudes
+        amp1 = np.random.uniform(0.8, 1.2)
+        amp2 = np.random.uniform(0.8, 1.2)
+        amp3 = np.random.uniform(0.3, 0.7)
+        amp4 = np.random.uniform(0.3, 0.7)
+        amp5 = np.random.uniform(0.1, 0.3)
+
+        terrain_base = (amp1 * np.sin(X + phase1) + amp2 * np.cos(Y + phase2) +
+                       amp3 * np.sin(2*X + np.random.uniform(0, 2*np.pi)) +
+                       amp4 * np.cos(2*Y + np.random.uniform(0, 2*np.pi)) +
+                       amp5 * np.sin(3*X) * np.cos(3*Y) +
+                       np.random.randn(gs, gs) * 0.3)  # Add significant noise
         terrain_base = (terrain_base - terrain_base.min()) / (terrain_base.max() - terrain_base.min())
 
         # 0. DEM (Digital Elevation Model) - 0 to 2000m
-        self.dem = terrain_base * 1500 + 200 + np.random.randn(gs, gs) * 50
+        # Add multiple scales of noise for realistic terrain variation
+        base_elevation = np.random.uniform(100, 500)  # Random base elevation
+        elevation_range = np.random.uniform(800, 1500)  # Random elevation range
+        noise_scale = np.random.uniform(50, 150)  # Random noise intensity
+
+        self.dem = terrain_base * elevation_range + base_elevation + np.random.randn(gs, gs) * noise_scale
+        # Add some random peaks and valleys
+        num_features = np.random.randint(3, 8)
+        for _ in range(num_features):
+            cx, cy = np.random.randint(0, gs, 2)
+            radius = np.random.uniform(5, 20)
+            height = np.random.uniform(-300, 500)
+            dist = np.sqrt((np.arange(gs)[:, None] - cx)**2 + (np.arange(gs)[None, :] - cy)**2)
+            self.dem += height * np.exp(-(dist**2) / (2 * radius**2))
+
         self.dem = np.clip(self.dem, 0, 2000)
 
         # 1. Slope (degrees) - derived from DEM
@@ -110,23 +144,35 @@ class Environment:
         self.curvature = (dxx + dyy) / 1000  # Normalized
 
         # 4. Roads Distance (km) - higher in remote areas
-        roads_centers = np.random.rand(5, 2) * gs
+        # Randomize number of roads and their positions
+        num_roads = np.random.randint(3, 10)
+        roads_centers = np.random.rand(num_roads, 2) * gs
         self.roads_distance = np.min([
             np.sqrt((X - c[0])**2 + (Y - c[1])**2)
             for c in roads_centers
-        ], axis=0) * 0.5  # Scale to km
+        ], axis=0) * np.random.uniform(0.3, 0.8)  # Random scale factor
 
         # 5. Population (people/km²) - lower in mountainous areas
         self.population = np.exp(-terrain_base * 3) * 500 + np.random.rand(gs, gs) * 50
 
         # 6-10. Land Cover (5 classes: Forest, Shrubland, Grassland, Agriculture, Settlement)
         # INCREASE vegetation cover for more fuel - mostly forest and shrubland
-        lc_pattern = terrain_base + np.random.randn(gs, gs) * 0.1
-        self.lc_forest = ((lc_pattern > 0.2) & (lc_pattern < 0.75)).astype(float)  # MORE FOREST
-        self.lc_shrubland = ((lc_pattern > 0.1) & (lc_pattern <= 0.2)).astype(float)  # MORE SHRUBLAND
-        self.lc_grassland = ((lc_pattern > 0.75)).astype(float)  # LOTS OF GRASSLAND
-        self.lc_agriculture = ((lc_pattern > 0.05) & (lc_pattern <= 0.1)).astype(float)
-        self.lc_settlement = ((lc_pattern <= 0.05)).astype(float)  # MINIMAL SETTLEMENT
+        # Add MORE randomness to land cover distribution
+        lc_pattern = terrain_base + np.random.randn(gs, gs) * np.random.uniform(0.15, 0.3)
+
+        # Randomize thresholds for each land cover type
+        forest_low = np.random.uniform(0.15, 0.25)
+        forest_high = np.random.uniform(0.65, 0.80)
+        shrub_low = np.random.uniform(0.05, 0.15)
+        grass_threshold = np.random.uniform(0.70, 0.85)
+        agr_low = np.random.uniform(0.02, 0.08)
+        settlement_threshold = np.random.uniform(0.01, 0.06)
+
+        self.lc_forest = ((lc_pattern > forest_low) & (lc_pattern < forest_high)).astype(float)
+        self.lc_shrubland = ((lc_pattern > shrub_low) & (lc_pattern <= forest_low)).astype(float)
+        self.lc_grassland = ((lc_pattern > grass_threshold)).astype(float)
+        self.lc_agriculture = ((lc_pattern > agr_low) & (lc_pattern <= shrub_low)).astype(float)
+        self.lc_settlement = ((lc_pattern <= settlement_threshold)).astype(float)
 
         # ========================================================================
         # WEATHER FEATURES - EXTREME FIRE CONDITIONS (within training ranges)
@@ -175,15 +221,25 @@ class Environment:
 
         # NDVI - Training range: -0.18 to 0.90 (NORMAL vegetation index!)
         # MAXIMUM fire fuel: DENSE vegetation (0.75-0.90) - lots of fuel!
-        self.ndvi = (self.lc_forest * 0.90 + self.lc_shrubland * 0.85 +
+        # BUT decreases significantly with elevation (less vegetation at high altitude)
+        base_ndvi = (self.lc_forest * 0.90 + self.lc_shrubland * 0.85 +
                     self.lc_grassland * 0.80 + self.lc_agriculture * 0.85 +
                     np.random.randn(gs, gs) * 0.02)
-        self.ndvi = np.clip(self.ndvi, 0.75, 0.90)
+
+        # Elevation factor: reduces vegetation dramatically above 800m
+        # At 800m: 100% vegetation, at 1400m: 20% vegetation, at 2000m: ~0% vegetation
+        elevation_factor = np.clip(1.0 - (self.dem - 800) / 600, 0.0, 1.0)
+        elevation_factor = elevation_factor ** 2  # Quadratic falloff for steeper reduction
+
+        self.ndvi = base_ndvi * elevation_factor
+        self.ndvi = np.clip(self.ndvi, 0.0, 0.90)
 
         # LAI (Leaf Area Index) - Training range: 0-6.8
         # MAXIMUM fire fuel: MAXIMUM LAI (5.5-6.8) - dense leaf coverage!
+        # Also reduced by elevation
         self.lai = self.ndvi * 7 + 0.5 + np.random.randn(gs, gs) * 0.3
-        self.lai = np.clip(self.lai, 5.5, 6.8)
+        self.lai = self.lai * elevation_factor  # Apply elevation reduction again
+        self.lai = np.clip(self.lai, 0.0, 6.8)
 
         # Soil Moisture Index (smi) - Training range: 0-0.79 (fraction)
         # ABSOLUTE MINIMUM: 0% soil moisture - COMPLETELY DRY!
