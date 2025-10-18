@@ -148,19 +148,26 @@ The simulation visualizes:
 
 Both models were trained for 50 epochs on the MesoGEOS wildfire dataset. Performance metrics are evaluated on the validation set at the best epoch (minimum validation loss).
 
-![Confusion Matrices](results/confusion_matrices.png)
+| Metric | 3D U-Net (Epoch 50) | ConvLSTM (Epoch 50) | Description |
+|--------|---------------------|---------------------|-------------|
+| **Precision** | 0.9616 | 0.2855 | Accuracy when predicting fire presence |
+| **Recall** | 0.9973 | 0.9327 | Ability to detect actual fire spread |
+| **F1 Score** | 0.9791 | 0.4369 | Harmonic mean of precision and recall |
+| **IoU** | 0.9590 | 0.2799 | Spatial overlap with ground truth |
 
-#### 3D U-Net (Epoch 50)
-- **Precision**: 0.9616 - High accuracy when predicting fire presence (few false positives)
-- **Recall**: 0.9973 - Excellent at detecting actual fire spread (captures almost all fire cells)
-- **F1 Score**: 0.9791 - Outstanding balance between precision and recall
-- **IoU**: 0.9590 - Very high overlap between predicted and actual burned areas
+#### Performance Summary
 
-#### ConvLSTM (Epoch 50)
-- **Precision**: 0.2855 - More false positives (predicts fire in non-burning areas)
-- **Recall**: 0.9327 - Good at detecting actual fire cells
-- **F1 Score**: 0.4369 - Moderate overall performance
-- **IoU**: 0.2799 - Lower spatial overlap with ground truth
+**3D U-Net (Epoch 50)**
+- High accuracy when predicting fire presence (few false positives)
+- Excellent at detecting actual fire spread (captures almost all fire cells)
+- Outstanding balance between precision and recall
+- Very high overlap between predicted and actual burned areas
+
+**ConvLSTM (Epoch 50)**
+- More false positives (predicts fire in non-burning areas)
+- Good at detecting actual fire cells
+- Moderate overall performance
+- Lower spatial overlap with ground truth
 
 ### Key Findings
 
