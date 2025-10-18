@@ -202,7 +202,7 @@ class WildfirePrototype:
                 self.animation = FuncAnimation(
                     self.fig,
                     self._update_frame,
-                    interval=500,  # 500ms = 0.5 seconds per step
+                    interval=100,  # 500ms = 0.5 seconds per step
                     blit=False,
                     cache_frame_data=False
                 )
